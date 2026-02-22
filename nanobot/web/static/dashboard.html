@@ -1524,6 +1524,123 @@
         .status-dot.offline { background: var(--text-muted); }
         .connection-status.online { color: var(--success); }
         .connection-status.online .status-dot { background: var(--success); box-shadow: 0 0 6px var(--success); }
+
+        /* Setup Wizard Overlay */
+        .setup-wizard-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(30, 27, 75, 0.7);
+            backdrop-filter: blur(8px);
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: fadeIn 0.3s ease;
+        }
+        .setup-wizard-overlay.hidden { display: none; }
+        .setup-wizard {
+            background: var(--bg-surface);
+            border-radius: 20px;
+            padding: 48px;
+            max-width: 560px;
+            width: 90%;
+            box-shadow: var(--shadow-xl), 0 0 60px rgba(109, 40, 217, 0.15);
+            text-align: center;
+        }
+        .setup-wizard h2 {
+            font-family: 'DM Sans', sans-serif;
+            font-size: 28px;
+            font-weight: 800;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+        .setup-wizard .setup-subtitle {
+            color: var(--text-secondary);
+            font-size: 15px;
+            margin-bottom: 32px;
+            line-height: 1.5;
+        }
+        .setup-wizard .setup-field {
+            text-align: left;
+            margin-bottom: 20px;
+        }
+        .setup-wizard .setup-field label {
+            display: block;
+            font-weight: 600;
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .setup-wizard .setup-field input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', monospace;
+            transition: border-color 0.2s;
+            box-sizing: border-box;
+            background: var(--bg-base);
+        }
+        .setup-wizard .setup-field input:focus {
+            outline: none;
+            border-color: var(--primary-500);
+            box-shadow: var(--shadow-focus);
+        }
+        .setup-wizard .setup-field .field-hint {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+        .setup-wizard .setup-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 28px;
+        }
+        .setup-wizard .setup-actions .btn { flex: 1; padding: 14px; font-size: 15px; }
+        .setup-wizard .setup-divider {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 20px 0;
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+        .setup-wizard .setup-divider::before,
+        .setup-wizard .setup-divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--border);
+        }
+        .setup-wizard .provider-quick-pick {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: center;
+            margin-bottom: 16px;
+        }
+        .setup-wizard .provider-pill {
+            padding: 6px 14px;
+            border-radius: 20px;
+            border: 1px solid var(--border);
+            background: var(--bg-base);
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .setup-wizard .provider-pill:hover {
+            border-color: var(--primary-400);
+            background: var(--primary-50);
+        }
+        .setup-wizard .provider-pill.selected {
+            border-color: var(--primary-600);
+            background: var(--primary-100);
+            color: var(--primary-800);
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
@@ -1630,12 +1747,15 @@
                     <span class="status-text">Offline</span>
                 </div>
                 <div class="page-actions">
+                    <button class="btn btn-primary" onclick="saveAllToBackend()" id="btnSaveAll" title="Save everything to ~/.nanobot/config.json">
+                        Save Config
+                    </button>
                     <label class="btn btn-secondary" style="cursor:pointer">
-                        📤 Import Config
+                        Import
                         <input type="file" accept=".json" style="display:none" onchange="importConfig(event)">
                     </label>
-                    <button class="btn btn-primary" onclick="exportConfig()">
-                        📥 Export Config
+                    <button class="btn btn-secondary" onclick="exportConfig()">
+                        Export
                     </button>
                 </div>
             </div>
@@ -1895,6 +2015,10 @@
                                 </div>
                                 <div class="form-group">
                                     <textarea class="form-textarea" id="agentSystemPrompt" rows="8" oninput="syncConfig()">You are Nanobot, an AI agent framework assistant. You help users configure and manage their AI agents, channels, tools, and workflows. Be helpful, concise, and technical when needed.</textarea>
+                                </div>
+                                <div style="display: flex; gap: 12px; margin-top: 16px;">
+                                    <button class="btn btn-primary" onclick="saveAgentConfigToBackend()">Save to config.json</button>
+                                    <button class="btn btn-secondary" onclick="restartAgent()">Restart Agent</button>
                                 </div>
                             </div>
                         </div>
@@ -2514,6 +2638,41 @@ Write important context, facts, and information here...
         </div>
     </div>
 
+    <!-- Setup Wizard (shown on first run when no API keys are configured) -->
+    <div class="setup-wizard-overlay hidden" id="setupWizard">
+        <div class="setup-wizard">
+            <h2>Welcome to Nanobot</h2>
+            <p class="setup-subtitle">
+                Add an API key to get started. All settings are saved directly to <code style="background:var(--bg-subtle);padding:2px 6px;border-radius:4px;font-size:13px;">~/.nanobot/config.json</code> on your server.
+            </p>
+
+            <div class="provider-quick-pick" id="wizardProviderPick">
+                <span class="provider-pill selected" data-provider="openrouter" onclick="wizardSelectProvider(this)">OpenRouter</span>
+                <span class="provider-pill" data-provider="anthropic" onclick="wizardSelectProvider(this)">Anthropic</span>
+                <span class="provider-pill" data-provider="openai" onclick="wizardSelectProvider(this)">OpenAI</span>
+                <span class="provider-pill" data-provider="deepseek" onclick="wizardSelectProvider(this)">DeepSeek</span>
+                <span class="provider-pill" data-provider="gemini" onclick="wizardSelectProvider(this)">Gemini</span>
+            </div>
+
+            <div class="setup-field">
+                <label id="wizardKeyLabel">OPENROUTER API KEY</label>
+                <input type="password" id="wizardApiKey" placeholder="sk-or-...">
+                <div class="field-hint" id="wizardKeyHint">Get one at <a href="https://openrouter.ai/keys" target="_blank" style="color:var(--primary-600)">openrouter.ai/keys</a></div>
+            </div>
+
+            <div class="setup-field" id="wizardModelField">
+                <label>MODEL (optional)</label>
+                <input type="text" id="wizardModel" placeholder="anthropic/claude-sonnet-4-20250514" value="">
+                <div class="field-hint">Leave blank for default. Change later in Agent Config.</div>
+            </div>
+
+            <div class="setup-actions">
+                <button class="btn btn-secondary" onclick="dismissWizard()">Skip</button>
+                <button class="btn btn-primary" onclick="completeWizard()">Save & Start</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         // ============================================================
         // NANOBOT DASHBOARD — FULLY MODIFIABLE API-DRIVEN ENGINE
@@ -2966,8 +3125,104 @@ Write important context, facts, and information here...
                 }
             }
 
+            // Check if setup wizard should be shown
+            if (NanobotAPI.connected) {
+                const hasAnyKey = Object.values(state.providers).some(p => p.enabled || p.fields?.api_key);
+                if (!hasAnyKey) {
+                    showSetupWizard();
+                }
+            }
+
             emitEvent('ready', { state, backendConnected: NanobotAPI.connected });
         });
+
+        // --- Setup Wizard Functions ---
+        const wizardProviderHints = {
+            openrouter: { label: 'OPENROUTER API KEY', placeholder: 'sk-or-...', hint: 'Get one at <a href="https://openrouter.ai/keys" target="_blank" style="color:var(--primary-600)">openrouter.ai/keys</a> — routes to any model' },
+            anthropic: { label: 'ANTHROPIC API KEY', placeholder: 'sk-ant-...', hint: 'Get one at <a href="https://console.anthropic.com/keys" target="_blank" style="color:var(--primary-600)">console.anthropic.com</a>' },
+            openai: { label: 'OPENAI API KEY', placeholder: 'sk-...', hint: 'Get one at <a href="https://platform.openai.com/api-keys" target="_blank" style="color:var(--primary-600)">platform.openai.com</a>' },
+            deepseek: { label: 'DEEPSEEK API KEY', placeholder: 'sk-...', hint: 'Get one at <a href="https://platform.deepseek.com" target="_blank" style="color:var(--primary-600)">platform.deepseek.com</a>' },
+            gemini: { label: 'GEMINI API KEY', placeholder: 'AI...', hint: 'Get one at <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--primary-600)">aistudio.google.com</a>' },
+        };
+
+        function showSetupWizard() {
+            const el = document.getElementById('setupWizard');
+            if (el) el.classList.remove('hidden');
+        }
+
+        function dismissWizard() {
+            const el = document.getElementById('setupWizard');
+            if (el) el.classList.add('hidden');
+        }
+
+        function wizardSelectProvider(pill) {
+            document.querySelectorAll('.provider-pill').forEach(p => p.classList.remove('selected'));
+            pill.classList.add('selected');
+            const provider = pill.dataset.provider;
+            const info = wizardProviderHints[provider] || {};
+            document.getElementById('wizardKeyLabel').textContent = info.label || 'API KEY';
+            document.getElementById('wizardApiKey').placeholder = info.placeholder || 'sk-...';
+            document.getElementById('wizardKeyHint').innerHTML = info.hint || '';
+        }
+
+        async function completeWizard() {
+            const selectedPill = document.querySelector('.provider-pill.selected');
+            const provider = selectedPill ? selectedPill.dataset.provider : 'openrouter';
+            const apiKey = document.getElementById('wizardApiKey').value.trim();
+            const model = document.getElementById('wizardModel').value.trim();
+
+            if (!apiKey) {
+                toast('Please enter an API key');
+                return;
+            }
+
+            // Save provider to backend
+            if (NanobotAPI.connected) {
+                await NanobotAPI.saveProviderConfig(provider, { apiKey: apiKey });
+
+                // Save model if specified
+                if (model) {
+                    await NanobotAPI.saveAgentConfig({
+                        defaults: {
+                            model: model,
+                            workspace: '~/.nanobot/workspace',
+                            maxTokens: 8192,
+                            temperature: 0.7,
+                            maxToolIterations: 20,
+                            memoryWindow: 50,
+                        }
+                    });
+                    state.agentConfig.model = model;
+                }
+
+                // Update local state
+                if (!state.providers[provider]) state.providers[provider] = { enabled: false, fields: {} };
+                state.providers[provider].enabled = true;
+                state.providers[provider].fields.api_key = apiKey;
+
+                renderProviders();
+                populateAgentConfigForm();
+                updateStats();
+                saveState();
+                syncConfig();
+
+                toast('Setup complete — ' + provider + ' configured');
+            } else {
+                // Offline mode — just save to localStorage
+                if (!state.providers[provider]) state.providers[provider] = { enabled: false, fields: {} };
+                state.providers[provider].enabled = true;
+                state.providers[provider].fields.api_key = apiKey;
+                if (model) state.agentConfig.model = model;
+                renderProviders();
+                populateAgentConfigForm();
+                updateStats();
+                saveState();
+                syncConfig();
+                toast('Provider configured (offline mode)');
+            }
+
+            dismissWizard();
+        }
 
         // --- Navigation ---
         function navigate(pageId, element) {
@@ -3330,7 +3585,7 @@ Write important context, facts, and information here...
             if (memEl && state.memory) memEl.value = state.memory;
         }
 
-        // --- On field change: persist immediately ---
+        // --- On field change: persist immediately + save to backend ---
         function onFieldChange(dataKey, id) {
             const card = document.querySelector(`[data-id="${id}"]`);
             if (!card) return;
@@ -3339,6 +3594,145 @@ Write important context, facts, and information here...
             saveState();
             syncConfig();
             emitEvent('fieldChange', { dataKey, id, fields: state[dataKey][id].fields });
+            // Auto-save to backend
+            if (NanobotAPI.connected) {
+                saveToBackend(dataKey, id);
+            }
+        }
+
+        // --- Save a single item to backend config.json ---
+        function saveToBackend(dataKey, id) {
+            const s = state[dataKey][id];
+            if (!s) return;
+            if (dataKey === 'providers') {
+                NanobotAPI.saveProviderConfig(id, {
+                    apiKey: s.fields?.api_key || '',
+                    apiBase: s.fields?.base_url || null,
+                });
+            } else if (dataKey === 'channels') {
+                const channelData = { enabled: s.enabled || false };
+                if (s.fields) {
+                    for (const [k, v] of Object.entries(s.fields)) {
+                        const camel = k.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+                        if (k === 'allow_from' && typeof v === 'string') {
+                            channelData[camel] = v.split(',').map(x => x.trim()).filter(Boolean);
+                        } else {
+                            channelData[camel] = v;
+                        }
+                    }
+                }
+                NanobotAPI.saveChannelConfig(id, channelData);
+            } else if (dataKey === 'tools') {
+                saveToolsToBackend();
+            }
+        }
+
+        // --- Save full tools config to backend ---
+        function saveToolsToBackend() {
+            if (!NanobotAPI.connected) return;
+            const toolsCfg = { exec: { timeout: 60 }, web: { search: { apiKey: '', maxResults: 5 } }, restrictToWorkspace: false, mcpServers: {} };
+            const shellState = state.tools.shell;
+            if (shellState?.fields?.timeout) toolsCfg.exec.timeout = parseInt(shellState.fields.timeout) || 60;
+            const wsState = state.tools.websearch;
+            if (wsState?.fields?.api_key) toolsCfg.web.search.apiKey = wsState.fields.api_key;
+            NanobotAPI.saveToolsConfig(toolsCfg);
+        }
+
+        // --- Save agent config to backend ---
+        function saveAgentConfigToBackend() {
+            if (!NanobotAPI.connected) return;
+            readAgentConfigForm();
+            const c = state.agentConfig;
+            NanobotAPI.saveAgentConfig({
+                defaults: {
+                    workspace: c.workspace || '~/.nanobot/workspace',
+                    model: c.model || 'anthropic/claude-opus-4-5',
+                    maxTokens: parseInt(c.max_tokens) || 8192,
+                    temperature: parseFloat(c.temperature) || 0.7,
+                    maxToolIterations: parseInt(c.max_iterations) || 20,
+                    memoryWindow: parseInt(c.memory_window) || 50,
+                }
+            });
+            toast('Agent config saved to config.json');
+        }
+
+        // --- Restart agent loop ---
+        async function restartAgent() {
+            if (!NanobotAPI.connected) {
+                toast('Not connected to backend');
+                return;
+            }
+            toast('Restarting agent...');
+            const result = await NanobotAPI.restartAgent();
+            if (result?.ok) {
+                toast('Agent restarted successfully');
+            } else {
+                toast('Failed to restart agent');
+            }
+        }
+
+        // --- Save all config to backend at once ---
+        async function saveAllToBackend() {
+            if (!NanobotAPI.connected) {
+                toast('Not connected to backend');
+                return;
+            }
+            readAgentConfigForm();
+            const c = state.agentConfig;
+            const configData = {
+                agents: {
+                    defaults: {
+                        workspace: c.workspace || '~/.nanobot/workspace',
+                        model: c.model || 'anthropic/claude-opus-4-5',
+                        maxTokens: parseInt(c.max_tokens) || 8192,
+                        temperature: parseFloat(c.temperature) || 0.7,
+                        maxToolIterations: parseInt(c.max_iterations) || 20,
+                        memoryWindow: parseInt(c.memory_window) || 50,
+                    }
+                },
+                providers: {},
+                channels: {},
+                tools: { exec: { timeout: 60 }, web: { search: { apiKey: '', maxResults: 5 } }, restrictToWorkspace: false, mcpServers: {} },
+            };
+            // Build providers
+            providers.forEach(p => {
+                const ps = state.providers[p.id];
+                configData.providers[p.id] = {
+                    apiKey: ps?.fields?.api_key || '',
+                    apiBase: ps?.fields?.base_url || null,
+                };
+            });
+            // Build channels
+            channels.forEach(ch => {
+                const cs = state.channels[ch.id];
+                const chData = { enabled: cs?.enabled || false };
+                if (cs?.fields) {
+                    for (const [k, v] of Object.entries(cs.fields)) {
+                        const camel = k.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+                        if (k === 'allow_from' && typeof v === 'string') {
+                            chData[camel] = v.split(',').map(x => x.trim()).filter(Boolean);
+                        } else {
+                            chData[camel] = v;
+                        }
+                    }
+                }
+                configData.channels[ch.id] = chData;
+            });
+            // Tools
+            const shellState = state.tools.shell;
+            if (shellState?.fields?.timeout) configData.tools.exec.timeout = parseInt(shellState.fields.timeout) || 60;
+            const wsState = state.tools.websearch;
+            if (wsState?.fields?.api_key) configData.tools.web.search.apiKey = wsState.fields.api_key;
+
+            const result = await NanobotAPI.fetch('/api/config', {
+                method: 'PUT',
+                body: JSON.stringify(configData),
+            });
+            if (result?.ok) {
+                toast('All configuration saved to config.json');
+            } else {
+                toast('Failed to save configuration');
+            }
         }
 
         // --- Toggle Functions ---
@@ -3350,14 +3744,7 @@ Write important context, facts, and information here...
             saveState();
             syncConfig();
             emitEvent('toggleProvider', { id, enabled: state.providers[id].enabled });
-
-            if (NanobotAPI.connected) {
-                const pState = state.providers[id];
-                NanobotAPI.saveProviderConfig(id, {
-                    apiKey: pState.fields?.api_key || '',
-                    apiBase: pState.fields?.base_url || null,
-                });
-            }
+            if (NanobotAPI.connected) saveToBackend('providers', id);
         }
 
         function toggleChannel(id) {
@@ -3370,14 +3757,7 @@ Write important context, facts, and information here...
                 saveState();
                 syncConfig();
                 emitEvent('toggleChannel', { id, enabled: state.channels[id].enabled });
-
-                if (NanobotAPI.connected) {
-                    const cState = state.channels[id];
-                    NanobotAPI.saveChannelConfig(id, {
-                        enabled: cState.enabled,
-                        ...cState.fields
-                    });
-                }
+                if (NanobotAPI.connected) saveToBackend('channels', id);
             }
         }
 
@@ -3726,15 +4106,12 @@ Write important context, facts, and information here...
             const content = document.getElementById('memoryContent')?.value || '';
             state.memory = content;
             saveState();
-            toast('Memory saved');
             emitEvent('saveMemory', { content });
-
             if (NanobotAPI.connected) {
                 NanobotAPI.saveMemory(content);
-            }
-
-            if (NanobotAPI.connected) {
-                NanobotAPI.saveMemory(content);
+                toast('Memory saved to MEMORY.md');
+            } else {
+                toast('Memory saved locally');
             }
         }
 
