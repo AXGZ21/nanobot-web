@@ -98,6 +98,18 @@ def _get_session_from_request(request: web.Request) -> str | None:
 PUBLIC_PATHS = {"/api/auth/login", "/api/auth/status", "/api/auth/setup"}
 
 
+def _is_local_request(request: web.Request) -> bool:
+    """Check if the request is truly from localhost (not through a reverse proxy)."""
+    # If there's an X-Forwarded-For header, this is proxied — NOT local
+    if request.headers.get("X-Forwarded-For"):
+        return False
+    if request.headers.get("X-Real-IP"):
+        return False
+
+    peername = request.transport.get_extra_info("peername")
+    return bool(peername and peername[0] in ("127.0.0.1", "::1"))
+
+
 @web.middleware
 async def auth_middleware(request: web.Request, handler):
     """Require authentication for all routes except login."""
@@ -108,12 +120,16 @@ async def auth_middleware(request: web.Request, handler):
         return await handler(request)
 
     # Localhost requests from the agent's self-admin skill bypass auth
-    peername = request.transport.get_extra_info("peername")
-    if peername and peername[0] in ("127.0.0.1", "::1"):
+    # Only truly local connections (not proxied through Railway/nginx)
+    if _is_local_request(request):
         return await handler(request)
 
-    # If no password is set, allow everything (first-run state)
+    # If no password is set, redirect to setup (force password creation)
     if not _has_password():
+        if path == "/" or path.startswith("/static"):
+            raise web.HTTPFound("/api/auth/login")
+        if path.startswith("/api/") or path.startswith("/ws/"):
+            return web.json_response({"error": "Password not set. Visit the dashboard to create one."}, status=401)
         return await handler(request)
 
     # Check session

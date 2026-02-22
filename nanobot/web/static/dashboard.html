@@ -2784,7 +2784,15 @@ Write important context, facts, and information here...
                     });
                     if (!res.ok) {
                         const err = await res.json().catch(() => ({}));
-                        throw new Error(err.error || `HTTP ${res.status}`);
+                        const errMsg = err.error || `HTTP ${res.status}`;
+                        console.error('API error:', path, errMsg);
+                        if (res.status === 401) {
+                            // Redirect to login on auth failure
+                            window.location.href = '/api/auth/login';
+                            return null;
+                        }
+                        toast('API error: ' + errMsg);
+                        throw new Error(errMsg);
                     }
                     return await res.json();
                 } catch (e) {
@@ -3985,14 +3993,22 @@ Write important context, facts, and information here...
         }
 
         // --- Save full tools config to backend ---
-        function saveToolsToBackend() {
+        async function saveToolsToBackend() {
             if (!NanobotAPI.connected) return;
-            const toolsCfg = { exec: { timeout: 60 }, web: { search: { apiKey: '', maxResults: 5 } }, restrictToWorkspace: false, mcpServers: {} };
+            // Use PATCH to only update the specific fields that changed
+            const patch = { tools: {} };
             const shellState = state.tools.shell;
-            if (shellState?.fields?.timeout) toolsCfg.exec.timeout = parseInt(shellState.fields.timeout) || 60;
+            if (shellState?.fields?.timeout) {
+                patch.tools.exec = { timeout: parseInt(shellState.fields.timeout) || 60 };
+            }
             const wsState = state.tools.websearch;
-            if (wsState?.fields?.api_key) toolsCfg.web.search.apiKey = wsState.fields.api_key;
-            NanobotAPI.saveToolsConfig(toolsCfg);
+            if (wsState?.fields?.api_key) {
+                patch.tools.web = { search: { apiKey: wsState.fields.api_key } };
+            }
+            const result = await NanobotAPI.patchConfig(patch);
+            if (result?.ok) {
+                toast('Tools config saved');
+            }
         }
 
         // --- Save agent config to backend ---
