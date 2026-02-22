@@ -585,6 +585,101 @@ async def put_workspace_file(request: web.Request) -> web.Response:
 
 
 # ============================================================================
+# Dashboard extensions (custom pages, widgets injected by the agent)
+# ============================================================================
+
+async def get_dashboard_extensions(request: web.Request) -> web.Response:
+    """GET /api/dashboard/extensions — list all custom dashboard extensions."""
+    ext_file = request.app["data_dir"] / "dashboard" / "extensions.json"
+    if ext_file.exists():
+        data = json.loads(ext_file.read_text(encoding="utf-8"))
+        return _json(data)
+    return _json({"pages": {}, "widgets": []})
+
+
+async def put_dashboard_extension(request: web.Request) -> web.Response:
+    """PUT /api/dashboard/extensions/{id} — add or update a dashboard extension.
+
+    Body: {
+        "type": "page" | "widget",
+        "title": "My Page",
+        "html": "<div>...</div>",
+        "css": "optional CSS",
+        "js": "optional JS",
+        "icon": "optional emoji",
+        "position": "sidebar" | "overview"  (for widgets)
+    }
+    """
+    ext_id = request.match_info["id"]
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        return _err("Invalid JSON")
+
+    ext_dir = request.app["data_dir"] / "dashboard"
+    ext_dir.mkdir(parents=True, exist_ok=True)
+    ext_file = ext_dir / "extensions.json"
+
+    if ext_file.exists():
+        data = json.loads(ext_file.read_text(encoding="utf-8"))
+    else:
+        data = {"pages": {}, "widgets": []}
+
+    ext_type = body.get("type", "page")
+
+    if ext_type == "page":
+        data["pages"][ext_id] = {
+            "title": body.get("title", ext_id),
+            "html": body.get("html", ""),
+            "css": body.get("css", ""),
+            "js": body.get("js", ""),
+            "icon": body.get("icon", ""),
+        }
+    elif ext_type == "widget":
+        # Remove existing widget with same id
+        data["widgets"] = [w for w in data["widgets"] if w.get("id") != ext_id]
+        data["widgets"].append({
+            "id": ext_id,
+            "title": body.get("title", ext_id),
+            "html": body.get("html", ""),
+            "css": body.get("css", ""),
+            "js": body.get("js", ""),
+            "position": body.get("position", "overview"),
+        })
+
+    ext_file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    await _broadcast(request.app, "dashboard:extension:updated", {"id": ext_id})
+    return _json({"ok": True})
+
+
+async def delete_dashboard_extension(request: web.Request) -> web.Response:
+    """DELETE /api/dashboard/extensions/{id} — remove a dashboard extension."""
+    ext_id = request.match_info["id"]
+    ext_file = request.app["data_dir"] / "dashboard" / "extensions.json"
+
+    if not ext_file.exists():
+        return _err("No extensions found", 404)
+
+    data = json.loads(ext_file.read_text(encoding="utf-8"))
+    removed = False
+
+    if ext_id in data.get("pages", {}):
+        del data["pages"][ext_id]
+        removed = True
+
+    data["widgets"] = [w for w in data.get("widgets", []) if w.get("id") != ext_id]
+    if not removed and len(data.get("widgets", [])) != len(json.loads(ext_file.read_text()).get("widgets", [])):
+        removed = True
+
+    if not removed:
+        return _err(f"Extension not found: {ext_id}", 404)
+
+    ext_file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    await _broadcast(request.app, "dashboard:extension:removed", {"id": ext_id})
+    return _json({"ok": True})
+
+
+# ============================================================================
 # Chat WebSocket
 # ============================================================================
 
@@ -1072,6 +1167,11 @@ def setup_routes(app: web.Application) -> None:
     app.router.add_get("/api/status", get_status)
     app.router.add_get("/api/workspace", get_workspace_files)
     app.router.add_put("/api/workspace/{name}", put_workspace_file)
+
+    # Dashboard extensions
+    app.router.add_get("/api/dashboard/extensions", get_dashboard_extensions)
+    app.router.add_put("/api/dashboard/extensions/{id}", put_dashboard_extension)
+    app.router.add_delete("/api/dashboard/extensions/{id}", delete_dashboard_extension)
 
     # OAuth
     app.router.add_get("/api/oauth/{provider}/status", get_oauth_status)

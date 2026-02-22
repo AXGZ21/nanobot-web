@@ -2903,6 +2903,10 @@ Write important context, facts, and information here...
                 return await this.fetch('/api/agent/restart', { method: 'POST' });
             },
 
+            async loadExtensions() {
+                return await this.fetch('/api/dashboard/extensions');
+            },
+
             async oauthStatus(provider) {
                 return await this.fetch(`/api/oauth/${provider}/status`);
             },
@@ -2945,10 +2949,14 @@ Write important context, facts, and information here...
             connectEvents() {
                 const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
                 this.eventsWs = new WebSocket(`${proto}//${location.host}/ws/events`);
-                this.eventsWs.onmessage = (e) => {
+                this.eventsWs.onmessage = async (e) => {
                     const data = JSON.parse(e.data);
                     if (data.event === 'config:updated') {
                         this.loadConfig();
+                    }
+                    if (data.event && data.event.startsWith('dashboard:extension:')) {
+                        const extensions = await this.loadExtensions();
+                        if (extensions) renderExtensions(extensions);
                     }
                 };
                 this.eventsWs.onclose = () => {
@@ -3174,8 +3182,108 @@ Write important context, facts, and information here...
                 }
             }
 
+            // Load dashboard extensions (custom pages & widgets from agent)
+            if (NanobotAPI.connected) {
+                const extensions = await NanobotAPI.loadExtensions();
+                if (extensions) {
+                    renderExtensions(extensions);
+                }
+            }
+
             emitEvent('ready', { state, backendConnected: NanobotAPI.connected });
         });
+
+        // --- Dashboard Extensions ---
+        function renderExtensions(ext) {
+            // Render custom pages as sidebar nav items + page containers
+            const pages = ext.pages || {};
+            const sidebar = document.querySelector('.sidebar-nav');
+            const pageContainer = document.querySelector('.main-content');
+            const existingExtNav = document.querySelectorAll('.nav-item[data-ext]');
+            existingExtNav.forEach(el => el.remove());
+            const existingExtPages = document.querySelectorAll('.page[data-ext]');
+            existingExtPages.forEach(el => el.remove());
+
+            const pageIds = Object.keys(pages);
+            if (pageIds.length > 0) {
+                // Add a section label if there are custom pages
+                let extSection = document.getElementById('extNavSection');
+                if (!extSection) {
+                    extSection = document.createElement('div');
+                    extSection.id = 'extNavSection';
+                    extSection.className = 'nav-section';
+                    extSection.innerHTML = '<div class="nav-section-label">Extensions</div>';
+                    sidebar.appendChild(extSection);
+                }
+
+                pageIds.forEach(id => {
+                    const pg = pages[id];
+                    // Nav item
+                    const nav = document.createElement('div');
+                    nav.className = 'nav-item';
+                    nav.dataset.page = 'ext-' + id;
+                    nav.dataset.ext = id;
+                    nav.onclick = function() { navigate('ext-' + id, this); };
+                    nav.innerHTML = `<div class="nav-item-label"><span class="nav-item-icon">${pg.icon || '📦'}</span>${pg.title || id}</div>`;
+                    extSection.appendChild(nav);
+
+                    // Page container
+                    const page = document.createElement('div');
+                    page.id = 'ext-' + id;
+                    page.className = 'page';
+                    page.dataset.ext = id;
+                    page.style.display = 'none';
+                    page.innerHTML = pg.html || '';
+                    pageContainer.appendChild(page);
+
+                    // Inject CSS
+                    if (pg.css) {
+                        const style = document.createElement('style');
+                        style.textContent = pg.css;
+                        style.dataset.ext = id;
+                        document.head.appendChild(style);
+                    }
+
+                    // Execute JS
+                    if (pg.js) {
+                        try { new Function(pg.js)(); } catch(e) { console.warn('Extension JS error (' + id + '):', e); }
+                    }
+                });
+            }
+
+            // Render widgets into overview page
+            const widgets = ext.widgets || [];
+            let widgetContainer = document.getElementById('extWidgets');
+            if (!widgetContainer) {
+                const overview = document.getElementById('overview');
+                if (overview) {
+                    widgetContainer = document.createElement('div');
+                    widgetContainer.id = 'extWidgets';
+                    widgetContainer.style.marginTop = '24px';
+                    overview.appendChild(widgetContainer);
+                }
+            }
+            if (widgetContainer) {
+                widgetContainer.innerHTML = '';
+                widgets.forEach(w => {
+                    const div = document.createElement('div');
+                    div.className = 'mb-24';
+                    div.dataset.ext = w.id;
+                    div.innerHTML = w.html || '';
+                    widgetContainer.appendChild(div);
+
+                    if (w.css) {
+                        const style = document.createElement('style');
+                        style.textContent = w.css;
+                        style.dataset.ext = w.id;
+                        document.head.appendChild(style);
+                    }
+                    if (w.js) {
+                        try { new Function(w.js)(); } catch(e) { console.warn('Widget JS error (' + w.id + '):', e); }
+                    }
+                });
+            }
+        }
 
         // --- Setup Wizard Functions ---
         const wizardProviderHints = {
