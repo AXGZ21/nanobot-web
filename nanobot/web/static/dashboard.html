@@ -1987,6 +1987,8 @@
                                         <option value="moonshot">Moonshot</option>
                                         <option value="minimax">MiniMax</option>
                                         <option value="vllm">vLLM</option>
+                                        <option value="openai_codex">OpenAI Codex (OAuth)</option>
+                                        <option value="github_copilot">GitHub Copilot (OAuth)</option>
                                         <option value="custom">Custom</option>
                                     </select>
                                 </div>
@@ -2554,6 +2556,8 @@ Write important context, facts, and information here...
                                     <option value="moonshot">Moonshot</option>
                                     <option value="minimax">MiniMax</option>
                                     <option value="vllm">vLLM</option>
+                                    <option value="openai_codex">OpenAI Codex (OAuth)</option>
+                                    <option value="github_copilot">GitHub Copilot (OAuth)</option>
                                     <option value="custom">Custom</option>
                                 </select>
                             </div>
@@ -2683,6 +2687,8 @@ Write important context, facts, and information here...
                 <span class="provider-pill" data-provider="moonshot" onclick="wizardSelectProvider(this)">Moonshot</span>
                 <span class="provider-pill" data-provider="minimax" onclick="wizardSelectProvider(this)">MiniMax</span>
                 <span class="provider-pill" data-provider="vllm" onclick="wizardSelectProvider(this)">vLLM</span>
+                <span class="provider-pill" data-provider="openai_codex" onclick="wizardSelectProvider(this)">OpenAI Codex</span>
+                <span class="provider-pill" data-provider="github_copilot" onclick="wizardSelectProvider(this)">GitHub Copilot</span>
                 <span class="provider-pill" data-provider="custom" onclick="wizardSelectProvider(this)">Custom</span>
             </div>
 
@@ -3040,6 +3046,8 @@ Write important context, facts, and information here...
             { id: 'moonshot', name: 'Moonshot', color: 'success', tags: ['LLM'], fields: ['api_key'], note: 'Kimi' },
             { id: 'minimax', name: 'MiniMax', color: 'info', tags: ['LLM'], fields: ['api_key', 'group_id'], note: '' },
             { id: 'vllm', name: 'vLLM', color: 'warning', tags: ['LOCAL'], fields: ['base_url', 'model'], note: '' },
+            { id: 'openai_codex', name: 'OpenAI Codex', color: 'success', tags: ['LLM', 'OAUTH'], fields: [], isOAuth: true, note: 'OAuth — run: nanobot provider login openai-codex' },
+            { id: 'github_copilot', name: 'GitHub Copilot', color: 'primary', tags: ['LLM', 'OAUTH'], fields: [], isOAuth: true, note: 'OAuth — run: nanobot provider login github-copilot' },
             { id: 'custom', name: 'Custom', color: 'danger', tags: ['CUSTOM'], fields: ['base_url', 'api_key', 'model'], note: '' }
         ];
 
@@ -3155,6 +3163,8 @@ Write important context, facts, and information here...
             moonshot: { label: 'MOONSHOT API KEY', placeholder: 'sk-...', hint: 'Get one at <a href="https://platform.moonshot.cn" target="_blank" style="color:var(--primary-600)">platform.moonshot.cn</a> — Kimi models', fields: ['api_key'] },
             minimax: { label: 'MINIMAX API KEY', placeholder: 'sk-...', hint: 'Get one at <a href="https://platform.minimax.chat" target="_blank" style="color:var(--primary-600)">platform.minimax.chat</a>', fields: ['api_key'] },
             vllm: { label: 'VLLM BASE URL', placeholder: 'http://localhost:8000/v1', hint: 'URL of your local vLLM or OpenAI-compatible server', fields: ['base_url', 'model'], isLocal: true },
+            openai_codex: { label: 'OPENAI CODEX', placeholder: '', hint: 'OAuth-based — run <code style="background:var(--bg-subtle);padding:2px 6px;border-radius:4px;font-size:12px;">nanobot provider login openai-codex</code> in your terminal to authenticate', fields: [], isOAuth: true },
+            github_copilot: { label: 'GITHUB COPILOT', placeholder: '', hint: 'OAuth-based — run <code style="background:var(--bg-subtle);padding:2px 6px;border-radius:4px;font-size:12px;">nanobot provider login github-copilot</code> in your terminal to authenticate', fields: [], isOAuth: true },
             custom: { label: 'CUSTOM API BASE URL', placeholder: 'http://localhost:8000/v1', hint: 'Any OpenAI-compatible endpoint', fields: ['base_url', 'api_key', 'model'], isLocal: true },
         };
 
@@ -3176,10 +3186,21 @@ Write important context, facts, and information here...
 
             const keyField = document.getElementById('wizardKeyField');
             const baseUrlField = document.getElementById('wizardBaseUrlField');
+            const modelField = document.getElementById('wizardModelField');
 
-            if (info.isLocal) {
+            if (info.isOAuth) {
+                // OAuth providers: hide key & base_url, show hint only
+                keyField.style.display = 'none';
+                baseUrlField.style.display = '';
+                modelField.style.display = 'none';
+                document.getElementById('wizardBaseUrlLabel').textContent = info.label || 'OAUTH PROVIDER';
+                document.getElementById('wizardBaseUrl').style.display = 'none';
+                document.getElementById('wizardBaseUrlHint').innerHTML = info.hint || '';
+            } else if (info.isLocal) {
                 // Local providers: show base_url, optionally hide API key
                 baseUrlField.style.display = '';
+                modelField.style.display = '';
+                document.getElementById('wizardBaseUrl').style.display = '';
                 document.getElementById('wizardBaseUrlLabel').textContent = info.label || 'BASE URL';
                 document.getElementById('wizardBaseUrl').placeholder = info.placeholder || 'http://localhost:8000/v1';
                 document.getElementById('wizardBaseUrlHint').innerHTML = info.hint || '';
@@ -3196,6 +3217,8 @@ Write important context, facts, and information here...
             } else {
                 // Cloud providers: show API key, hide base_url
                 baseUrlField.style.display = 'none';
+                modelField.style.display = '';
+                document.getElementById('wizardBaseUrl').style.display = '';
                 keyField.style.display = '';
                 document.getElementById('wizardKeyLabel').textContent = info.label || 'API KEY';
                 document.getElementById('wizardApiKey').placeholder = info.placeholder || 'sk-...';
@@ -3212,7 +3235,9 @@ Write important context, facts, and information here...
             const model = document.getElementById('wizardModel').value.trim();
 
             // Validate required fields based on provider type
-            if (info.isLocal) {
+            if (info.isOAuth) {
+                // OAuth providers don't need any credentials from the wizard
+            } else if (info.isLocal) {
                 if (!baseUrl) {
                     toast('Please enter a base URL');
                     return;
@@ -3366,6 +3391,7 @@ Write important context, facts, and information here...
                     if (t === 'ROUTER') return '<span class="badge badge-warning">ROUTER</span>';
                     if (t === 'LOCAL') return '<span class="badge badge-info">LOCAL</span>';
                     if (t === 'CUSTOM') return '<span class="badge badge-primary">CUSTOM</span>';
+                    if (t === 'OAUTH') return '<span class="badge badge-warning">OAUTH</span>';
                     return `<span class="badge badge-gray">${t}</span>`;
                 }).join('');
                 const newBadge = p.isNew ? '<span class="badge badge-new">NEW</span>' : '';
