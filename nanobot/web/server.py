@@ -348,18 +348,31 @@ _LOGIN_PAGE_HTML = """<!DOCTYPE html>
     let isSetup = false;
 
     async function checkStatus() {
-        const res = await fetch('/api/auth/status');
-        const data = await res.json();
-        if (data.authenticated) {
-            window.location.href = '/';
-            return;
-        }
-        if (!data.passwordRequired) {
-            isSetup = true;
-            document.getElementById('subtitle').textContent = 'Create a dashboard password';
-            document.getElementById('confirmGroup').style.display = '';
-            document.getElementById('submitBtn').textContent = 'Set Password & Continue';
-            document.getElementById('setupNote').style.display = '';
+        try {
+            const res = await fetch('/api/auth/status');
+            if (!res.ok) {
+                // Auth endpoint error - show message, don't loop
+                return;
+            }
+            const data = await res.json();
+            // Check if setup is needed FIRST (before checking auth)
+            if (!data.passwordRequired) {
+                isSetup = true;
+                document.getElementById('subtitle').textContent = 'Create a dashboard password';
+                document.getElementById('confirmGroup').style.display = '';
+                document.getElementById('submitBtn').textContent = 'Set Password & Continue';
+                document.getElementById('setupNote').style.display = '';
+                return;
+            }
+            // If password is required and user is already authenticated, redirect to dashboard
+            if (data.authenticated) {
+                window.location.href = '/';
+                return;
+            }
+            // Otherwise show login form
+        } catch (e) {
+            // Network error - show login form, don't loop
+            console.error('Auth check failed:', e);
         }
     }
 
