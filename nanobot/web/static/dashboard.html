@@ -2652,9 +2652,25 @@ Write important context, facts, and information here...
                 <span class="provider-pill" data-provider="openai" onclick="wizardSelectProvider(this)">OpenAI</span>
                 <span class="provider-pill" data-provider="deepseek" onclick="wizardSelectProvider(this)">DeepSeek</span>
                 <span class="provider-pill" data-provider="gemini" onclick="wizardSelectProvider(this)">Gemini</span>
+                <span class="provider-pill" data-provider="groq" onclick="wizardSelectProvider(this)">Groq</span>
+                <span class="provider-pill" data-provider="aihubmix" onclick="wizardSelectProvider(this)">AiHubMix</span>
+                <span class="provider-pill" data-provider="siliconflow" onclick="wizardSelectProvider(this)">SiliconFlow</span>
+                <span class="provider-pill" data-provider="volcengine" onclick="wizardSelectProvider(this)">VolcEngine</span>
+                <span class="provider-pill" data-provider="dashscope" onclick="wizardSelectProvider(this)">DashScope</span>
+                <span class="provider-pill" data-provider="zhipu" onclick="wizardSelectProvider(this)">Zhipu</span>
+                <span class="provider-pill" data-provider="moonshot" onclick="wizardSelectProvider(this)">Moonshot</span>
+                <span class="provider-pill" data-provider="minimax" onclick="wizardSelectProvider(this)">MiniMax</span>
+                <span class="provider-pill" data-provider="vllm" onclick="wizardSelectProvider(this)">vLLM</span>
+                <span class="provider-pill" data-provider="custom" onclick="wizardSelectProvider(this)">Custom</span>
             </div>
 
-            <div class="setup-field">
+            <div class="setup-field" id="wizardBaseUrlField" style="display:none;">
+                <label id="wizardBaseUrlLabel">BASE URL</label>
+                <input type="text" id="wizardBaseUrl" placeholder="http://localhost:8000/v1">
+                <div class="field-hint" id="wizardBaseUrlHint">URL of your OpenAI-compatible server</div>
+            </div>
+
+            <div class="setup-field" id="wizardKeyField">
                 <label id="wizardKeyLabel">OPENROUTER API KEY</label>
                 <input type="password" id="wizardApiKey" placeholder="sk-or-...">
                 <div class="field-hint" id="wizardKeyHint">Get one at <a href="https://openrouter.ai/keys" target="_blank" style="color:var(--primary-600)">openrouter.ai/keys</a></div>
@@ -3103,11 +3119,21 @@ Write important context, facts, and information here...
 
         // --- Setup Wizard Functions ---
         const wizardProviderHints = {
-            openrouter: { label: 'OPENROUTER API KEY', placeholder: 'sk-or-...', hint: 'Get one at <a href="https://openrouter.ai/keys" target="_blank" style="color:var(--primary-600)">openrouter.ai/keys</a> — routes to any model' },
-            anthropic: { label: 'ANTHROPIC API KEY', placeholder: 'sk-ant-...', hint: 'Get one at <a href="https://console.anthropic.com/keys" target="_blank" style="color:var(--primary-600)">console.anthropic.com</a>' },
-            openai: { label: 'OPENAI API KEY', placeholder: 'sk-...', hint: 'Get one at <a href="https://platform.openai.com/api-keys" target="_blank" style="color:var(--primary-600)">platform.openai.com</a>' },
-            deepseek: { label: 'DEEPSEEK API KEY', placeholder: 'sk-...', hint: 'Get one at <a href="https://platform.deepseek.com" target="_blank" style="color:var(--primary-600)">platform.deepseek.com</a>' },
-            gemini: { label: 'GEMINI API KEY', placeholder: 'AI...', hint: 'Get one at <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--primary-600)">aistudio.google.com</a>' },
+            openrouter: { label: 'OPENROUTER API KEY', placeholder: 'sk-or-...', hint: 'Get one at <a href="https://openrouter.ai/keys" target="_blank" style="color:var(--primary-600)">openrouter.ai/keys</a> — routes to any model', fields: ['api_key'] },
+            anthropic: { label: 'ANTHROPIC API KEY', placeholder: 'sk-ant-...', hint: 'Get one at <a href="https://console.anthropic.com/keys" target="_blank" style="color:var(--primary-600)">console.anthropic.com</a>', fields: ['api_key'] },
+            openai: { label: 'OPENAI API KEY', placeholder: 'sk-...', hint: 'Get one at <a href="https://platform.openai.com/api-keys" target="_blank" style="color:var(--primary-600)">platform.openai.com</a>', fields: ['api_key'] },
+            deepseek: { label: 'DEEPSEEK API KEY', placeholder: 'sk-...', hint: 'Get one at <a href="https://platform.deepseek.com" target="_blank" style="color:var(--primary-600)">platform.deepseek.com</a>', fields: ['api_key'] },
+            gemini: { label: 'GEMINI API KEY', placeholder: 'AI...', hint: 'Get one at <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--primary-600)">aistudio.google.com</a>', fields: ['api_key'] },
+            groq: { label: 'GROQ API KEY', placeholder: 'gsk_...', hint: 'Get one at <a href="https://console.groq.com/keys" target="_blank" style="color:var(--primary-600)">console.groq.com</a> — also supports Whisper transcription', fields: ['api_key'] },
+            aihubmix: { label: 'AIHUBMIX API KEY', placeholder: 'sk-...', hint: 'Get one at <a href="https://aihubmix.com" target="_blank" style="color:var(--primary-600)">aihubmix.com</a> — OpenAI-compatible gateway', fields: ['api_key'] },
+            siliconflow: { label: 'SILICONFLOW API KEY', placeholder: 'sk-...', hint: 'Get one at <a href="https://cloud.siliconflow.cn" target="_blank" style="color:var(--primary-600)">cloud.siliconflow.cn</a>', fields: ['api_key'] },
+            volcengine: { label: 'VOLCENGINE API KEY', placeholder: 'sk-...', hint: 'Get one at <a href="https://console.volcengine.com" target="_blank" style="color:var(--primary-600)">console.volcengine.com</a> — Ark models', fields: ['api_key', 'base_url'] },
+            dashscope: { label: 'DASHSCOPE API KEY', placeholder: 'sk-...', hint: 'Get one at <a href="https://dashscope.console.aliyun.com" target="_blank" style="color:var(--primary-600)">dashscope.console.aliyun.com</a> — Alibaba Qwen models', fields: ['api_key'] },
+            zhipu: { label: 'ZHIPU API KEY', placeholder: 'sk-...', hint: 'Get one at <a href="https://open.bigmodel.cn" target="_blank" style="color:var(--primary-600)">open.bigmodel.cn</a> — GLM models', fields: ['api_key'] },
+            moonshot: { label: 'MOONSHOT API KEY', placeholder: 'sk-...', hint: 'Get one at <a href="https://platform.moonshot.cn" target="_blank" style="color:var(--primary-600)">platform.moonshot.cn</a> — Kimi models', fields: ['api_key'] },
+            minimax: { label: 'MINIMAX API KEY', placeholder: 'sk-...', hint: 'Get one at <a href="https://platform.minimax.chat" target="_blank" style="color:var(--primary-600)">platform.minimax.chat</a>', fields: ['api_key'] },
+            vllm: { label: 'VLLM BASE URL', placeholder: 'http://localhost:8000/v1', hint: 'URL of your local vLLM or OpenAI-compatible server', fields: ['base_url', 'model'], isLocal: true },
+            custom: { label: 'CUSTOM API BASE URL', placeholder: 'http://localhost:8000/v1', hint: 'Any OpenAI-compatible endpoint', fields: ['base_url', 'api_key', 'model'], isLocal: true },
         };
 
         function showSetupWizard() {
@@ -3125,25 +3151,65 @@ Write important context, facts, and information here...
             pill.classList.add('selected');
             const provider = pill.dataset.provider;
             const info = wizardProviderHints[provider] || {};
-            document.getElementById('wizardKeyLabel').textContent = info.label || 'API KEY';
-            document.getElementById('wizardApiKey').placeholder = info.placeholder || 'sk-...';
-            document.getElementById('wizardKeyHint').innerHTML = info.hint || '';
+
+            const keyField = document.getElementById('wizardKeyField');
+            const baseUrlField = document.getElementById('wizardBaseUrlField');
+
+            if (info.isLocal) {
+                // Local providers: show base_url, optionally hide API key
+                baseUrlField.style.display = '';
+                document.getElementById('wizardBaseUrlLabel').textContent = info.label || 'BASE URL';
+                document.getElementById('wizardBaseUrl').placeholder = info.placeholder || 'http://localhost:8000/v1';
+                document.getElementById('wizardBaseUrlHint').innerHTML = info.hint || '';
+
+                // Custom still needs an API key; vLLM does not
+                if (info.fields && info.fields.includes('api_key')) {
+                    keyField.style.display = '';
+                    document.getElementById('wizardKeyLabel').textContent = 'API KEY (optional)';
+                    document.getElementById('wizardApiKey').placeholder = 'sk-...';
+                    document.getElementById('wizardKeyHint').innerHTML = 'Leave blank if your server has no auth';
+                } else {
+                    keyField.style.display = 'none';
+                }
+            } else {
+                // Cloud providers: show API key, hide base_url
+                baseUrlField.style.display = 'none';
+                keyField.style.display = '';
+                document.getElementById('wizardKeyLabel').textContent = info.label || 'API KEY';
+                document.getElementById('wizardApiKey').placeholder = info.placeholder || 'sk-...';
+                document.getElementById('wizardKeyHint').innerHTML = info.hint || '';
+            }
         }
 
         async function completeWizard() {
             const selectedPill = document.querySelector('.provider-pill.selected');
             const provider = selectedPill ? selectedPill.dataset.provider : 'openrouter';
+            const info = wizardProviderHints[provider] || {};
             const apiKey = document.getElementById('wizardApiKey').value.trim();
+            const baseUrl = document.getElementById('wizardBaseUrl').value.trim();
             const model = document.getElementById('wizardModel').value.trim();
 
-            if (!apiKey) {
-                toast('Please enter an API key');
-                return;
+            // Validate required fields based on provider type
+            if (info.isLocal) {
+                if (!baseUrl) {
+                    toast('Please enter a base URL');
+                    return;
+                }
+            } else {
+                if (!apiKey) {
+                    toast('Please enter an API key');
+                    return;
+                }
             }
+
+            // Build the config payload for this provider
+            const providerConfig = {};
+            if (apiKey) providerConfig.apiKey = apiKey;
+            if (baseUrl) providerConfig.apiBase = baseUrl;
 
             // Save provider to backend
             if (NanobotAPI.connected) {
-                await NanobotAPI.saveProviderConfig(provider, { apiKey: apiKey });
+                await NanobotAPI.saveProviderConfig(provider, providerConfig);
 
                 // Save model if specified
                 if (model) {
@@ -3163,7 +3229,8 @@ Write important context, facts, and information here...
                 // Update local state
                 if (!state.providers[provider]) state.providers[provider] = { enabled: false, fields: {} };
                 state.providers[provider].enabled = true;
-                state.providers[provider].fields.api_key = apiKey;
+                if (apiKey) state.providers[provider].fields.api_key = apiKey;
+                if (baseUrl) state.providers[provider].fields.base_url = baseUrl;
 
                 renderProviders();
                 populateAgentConfigForm();
@@ -3176,7 +3243,8 @@ Write important context, facts, and information here...
                 // Offline mode — just save to localStorage
                 if (!state.providers[provider]) state.providers[provider] = { enabled: false, fields: {} };
                 state.providers[provider].enabled = true;
-                state.providers[provider].fields.api_key = apiKey;
+                if (apiKey) state.providers[provider].fields.api_key = apiKey;
+                if (baseUrl) state.providers[provider].fields.base_url = baseUrl;
                 if (model) state.agentConfig.model = model;
                 renderProviders();
                 populateAgentConfigForm();
