@@ -749,6 +749,266 @@ async def export_config(request: web.Request) -> web.Response:
 
 
 # ============================================================================
+# OAuth login endpoints
+# ============================================================================
+
+# Temporary store for in-flight PKCE state (Codex auth flow)
+_oauth_pending: dict[str, dict] = {}
+
+
+async def get_oauth_status(request: web.Request) -> web.Response:
+    """GET /api/oauth/{provider}/status — check if OAuth token exists."""
+    provider = request.match_info["provider"]
+
+    if provider == "openai_codex":
+        try:
+            from oauth_cli_kit import get_token
+            token = get_token()
+            if token and token.access:
+                return _json({"authenticated": True, "accountId": token.account_id or ""})
+        except Exception:
+            pass
+        return _json({"authenticated": False})
+
+    elif provider == "github_copilot":
+        # Check if LiteLLM has a cached Copilot token
+        try:
+            from pathlib import Path as _P
+            cache_dir = _P.home() / ".cache" / "litellm"
+            token_files = list(cache_dir.glob("*copilot*")) if cache_dir.exists() else []
+            if token_files:
+                return _json({"authenticated": True, "accountId": ""})
+        except Exception:
+            pass
+        return _json({"authenticated": False})
+
+    return _err(f"Unknown OAuth provider: {provider}", 404)
+
+
+async def post_oauth_start(request: web.Request) -> web.Response:
+    """POST /api/oauth/{provider}/start — begin OAuth flow, return auth URL."""
+    provider = request.match_info["provider"]
+
+    if provider == "openai_codex":
+        try:
+            import urllib.parse
+            from oauth_cli_kit import OPENAI_CODEX_PROVIDER
+            from oauth_cli_kit.pkce import _generate_pkce, _create_state
+
+            verifier, challenge = _generate_pkce()
+            state = _create_state()
+            prov = OPENAI_CODEX_PROVIDER
+
+            params = {
+                "response_type": "code",
+                "client_id": prov.client_id,
+                "redirect_uri": prov.redirect_uri,
+                "scope": prov.scope,
+                "code_challenge": challenge,
+                "code_challenge_method": "S256",
+                "state": state,
+                "id_token_add_organizations": "true",
+                "codex_cli_simplified_flow": "true",
+                "originator": prov.default_originator,
+            }
+            url = f"{prov.authorize_url}?{urllib.parse.urlencode(params)}"
+
+            # Store PKCE verifier for the callback step
+            _oauth_pending["openai_codex"] = {
+                "verifier": verifier,
+                "state": state,
+            }
+
+            return _json({
+                "authUrl": url,
+                "state": state,
+                "instructions": (
+                    "Open the URL in your browser, log in with OpenAI, "
+                    "then paste the full callback URL or authorization code below."
+                ),
+            })
+        except ImportError:
+            return _err("oauth-cli-kit not installed on server", 500)
+        except Exception as e:
+            return _err(f"Failed to start OAuth flow: {e}", 500)
+
+    elif provider == "github_copilot":
+        # GitHub Copilot uses LiteLLM's device flow.
+        # We trigger it in a background thread and capture stdout.
+        import io
+        import sys
+        import threading
+
+        captured = {"lines": [], "done": False, "error": None, "success": False}
+
+        def _run_copilot_auth():
+            old_stdout = sys.stdout
+            old_stderr = sys.stderr
+            buf = io.StringIO()
+            sys.stdout = buf
+            sys.stderr = buf
+            try:
+                import asyncio as _aio
+                from litellm import acompletion
+                _aio.run(acompletion(
+                    model="github_copilot/gpt-4o",
+                    messages=[{"role": "user", "content": "hi"}],
+                    max_tokens=1,
+                ))
+                captured["success"] = True
+            except Exception as e:
+                captured["error"] = str(e)
+            finally:
+                sys.stdout = old_stdout
+                sys.stderr = old_stderr
+                captured["lines"] = buf.getvalue().splitlines()
+                captured["done"] = True
+
+        # Store the capture dict so /poll can check it
+        _oauth_pending["github_copilot"] = captured
+
+        thread = threading.Thread(target=_run_copilot_auth, daemon=True)
+        thread.start()
+
+        # Wait briefly for the device code to appear in output
+        import time
+        for _ in range(30):
+            time.sleep(0.5)
+            if captured["done"] or captured["lines"]:
+                break
+
+        # Extract device code URL and code from the captured output
+        device_url = ""
+        device_code = ""
+        for line in captured["lines"]:
+            if "http" in line.lower():
+                import re
+                urls = re.findall(r'https?://[^\s<>"\']+', line)
+                if urls:
+                    device_url = urls[0]
+            if "code" in line.lower() or len(line.strip()) > 4:
+                # Try to find the device code (usually a short alphanumeric string)
+                import re
+                codes = re.findall(r'\b[A-Z0-9]{4,}(?:-[A-Z0-9]{4,})?\b', line)
+                if codes:
+                    device_code = codes[-1]
+
+        return _json({
+            "deviceUrl": device_url,
+            "deviceCode": device_code,
+            "output": captured["lines"],
+            "done": captured["done"],
+            "instructions": (
+                "Open the URL in your browser and enter the device code to authenticate."
+                if device_url else
+                "GitHub Copilot authentication is in progress. Check the output for instructions."
+            ),
+        })
+
+    return _err(f"Unknown OAuth provider: {provider}", 404)
+
+
+async def post_oauth_callback(request: web.Request) -> web.Response:
+    """POST /api/oauth/{provider}/callback — complete OAuth with auth code."""
+    provider = request.match_info["provider"]
+
+    if provider == "openai_codex":
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            return _err("Invalid JSON")
+
+        pending = _oauth_pending.get("openai_codex")
+        if not pending:
+            return _err("No pending OAuth flow — call /start first")
+
+        raw_input = body.get("code", "").strip()
+        if not raw_input:
+            return _err("Authorization code or callback URL is required")
+
+        try:
+            from oauth_cli_kit import OPENAI_CODEX_PROVIDER
+            from oauth_cli_kit.pkce import _parse_authorization_input, _parse_token_payload, _decode_account_id
+            from oauth_cli_kit.storage import FileTokenStorage
+            from oauth_cli_kit.models import OAuthToken
+            import httpx
+            import time
+
+            code, parsed_state = _parse_authorization_input(raw_input)
+            if parsed_state and parsed_state != pending["state"]:
+                return _err("State mismatch — possible CSRF. Start a new flow.")
+
+            if not code:
+                return _err("Could not parse authorization code from input")
+
+            # Exchange code for tokens
+            prov = OPENAI_CODEX_PROVIDER
+            data = {
+                "grant_type": "authorization_code",
+                "client_id": prov.client_id,
+                "code": code,
+                "code_verifier": pending["verifier"],
+                "redirect_uri": prov.redirect_uri,
+            }
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    prov.token_url,
+                    data=data,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                )
+
+            if response.status_code != 200:
+                return _err(f"Token exchange failed: {response.status_code} {response.text}")
+
+            payload = response.json()
+            access, refresh, expires_in = _parse_token_payload(
+                payload, "Token response missing fields"
+            )
+            account_id = _decode_account_id(
+                access, prov.jwt_claim_path, prov.account_id_claim
+            )
+            token = OAuthToken(
+                access=access,
+                refresh=refresh,
+                expires=int(time.time() * 1000 + expires_in * 1000),
+                account_id=account_id,
+            )
+
+            # Save token to disk
+            storage = FileTokenStorage(token_filename=prov.token_filename)
+            storage.save(token)
+
+            # Clean up pending state
+            _oauth_pending.pop("openai_codex", None)
+
+            return _json({
+                "ok": True,
+                "authenticated": True,
+                "accountId": account_id or "",
+            })
+
+        except Exception as e:
+            logger.error("OAuth callback failed: {}", e)
+            return _err(f"Token exchange failed: {e}")
+
+    elif provider == "github_copilot":
+        # For Copilot, poll the background thread status
+        captured = _oauth_pending.get("github_copilot")
+        if not captured:
+            return _err("No pending Copilot auth flow — call /start first")
+
+        return _json({
+            "done": captured["done"],
+            "success": captured.get("success", False),
+            "error": captured.get("error"),
+            "output": captured.get("lines", []),
+        })
+
+    return _err(f"Unknown OAuth provider: {provider}", 404)
+
+
+# ============================================================================
 # Helper
 # ============================================================================
 
@@ -812,6 +1072,11 @@ def setup_routes(app: web.Application) -> None:
     app.router.add_get("/api/status", get_status)
     app.router.add_get("/api/workspace", get_workspace_files)
     app.router.add_put("/api/workspace/{name}", put_workspace_file)
+
+    # OAuth
+    app.router.add_get("/api/oauth/{provider}/status", get_oauth_status)
+    app.router.add_post("/api/oauth/{provider}/start", post_oauth_start)
+    app.router.add_post("/api/oauth/{provider}/callback", post_oauth_callback)
 
     # WebSockets
     app.router.add_get("/ws/chat", ws_chat)

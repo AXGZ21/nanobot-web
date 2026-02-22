@@ -2710,9 +2710,24 @@ Write important context, facts, and information here...
                 <div class="field-hint">Leave blank for default. Change later in Agent Config.</div>
             </div>
 
+            <div id="wizardOAuthFlow" style="display:none;">
+                <div class="setup-field">
+                    <label id="wizardOAuthLabel">OAUTH LOGIN</label>
+                    <div id="wizardOAuthStatus" style="padding:12px;border-radius:8px;background:var(--bg-subtle);margin-bottom:8px;font-size:13px;line-height:1.6;">
+                        Click "Start Login" to begin the OAuth authentication flow.
+                    </div>
+                    <div id="wizardOAuthCodeField" style="display:none;">
+                        <label style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--text-muted);margin-bottom:4px;display:block;">PASTE CALLBACK URL OR CODE</label>
+                        <input type="text" id="wizardOAuthCode" placeholder="Paste the callback URL or authorization code here..." style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-family:monospace;font-size:13px;">
+                    </div>
+                </div>
+            </div>
+
             <div class="setup-actions">
                 <button class="btn btn-secondary" onclick="dismissWizard()">Skip</button>
-                <button class="btn btn-primary" onclick="completeWizard()">Save & Start</button>
+                <button class="btn btn-primary" id="wizardOAuthStartBtn" style="display:none;" onclick="startOAuthFromWizard()">Start Login</button>
+                <button class="btn btn-primary" id="wizardOAuthSubmitBtn" style="display:none;" onclick="submitOAuthFromWizard()">Submit Code</button>
+                <button class="btn btn-primary" id="wizardSaveBtn" onclick="completeWizard()">Save & Start</button>
             </div>
         </div>
     </div>
@@ -2886,6 +2901,21 @@ Write important context, facts, and information here...
 
             async restartAgent() {
                 return await this.fetch('/api/agent/restart', { method: 'POST' });
+            },
+
+            async oauthStatus(provider) {
+                return await this.fetch(`/api/oauth/${provider}/status`);
+            },
+
+            async oauthStart(provider) {
+                return await this.fetch(`/api/oauth/${provider}/start`, { method: 'POST' });
+            },
+
+            async oauthCallback(provider, code) {
+                return await this.fetch(`/api/oauth/${provider}/callback`, {
+                    method: 'POST',
+                    body: JSON.stringify({ code }),
+                });
             },
 
             connectChat() {
@@ -3187,15 +3217,43 @@ Write important context, facts, and information here...
             const keyField = document.getElementById('wizardKeyField');
             const baseUrlField = document.getElementById('wizardBaseUrlField');
             const modelField = document.getElementById('wizardModelField');
+            const oauthFlow = document.getElementById('wizardOAuthFlow');
+            const saveBtn = document.getElementById('wizardSaveBtn');
+            const oauthStartBtn = document.getElementById('wizardOAuthStartBtn');
+            const oauthSubmitBtn = document.getElementById('wizardOAuthSubmitBtn');
+
+            // Reset OAuth flow state
+            oauthFlow.style.display = 'none';
+            oauthStartBtn.style.display = 'none';
+            oauthSubmitBtn.style.display = 'none';
+            saveBtn.style.display = '';
+            document.getElementById('wizardOAuthCodeField').style.display = 'none';
+            document.getElementById('wizardOAuthStatus').innerHTML = 'Click "Start Login" to begin the OAuth authentication flow.';
 
             if (info.isOAuth) {
-                // OAuth providers: hide key & base_url, show hint only
+                // OAuth providers: hide all input fields, show OAuth flow
                 keyField.style.display = 'none';
-                baseUrlField.style.display = '';
+                baseUrlField.style.display = 'none';
                 modelField.style.display = 'none';
-                document.getElementById('wizardBaseUrlLabel').textContent = info.label || 'OAUTH PROVIDER';
-                document.getElementById('wizardBaseUrl').style.display = 'none';
-                document.getElementById('wizardBaseUrlHint').innerHTML = info.hint || '';
+                oauthFlow.style.display = '';
+                saveBtn.style.display = 'none';
+                oauthStartBtn.style.display = '';
+                document.getElementById('wizardOAuthLabel').textContent = info.label || 'OAUTH LOGIN';
+
+                // Check if already authenticated
+                if (NanobotAPI.connected) {
+                    NanobotAPI.oauthStatus(provider).then(status => {
+                        if (status && status.authenticated) {
+                            document.getElementById('wizardOAuthStatus').innerHTML =
+                                '<span style="color:var(--success-600);font-weight:600;">Authenticated</span>' +
+                                (status.accountId ? ` &mdash; ${status.accountId}` : '') +
+                                '<br>You can skip setup or dismiss this wizard.';
+                            oauthStartBtn.style.display = 'none';
+                            saveBtn.style.display = '';
+                            saveBtn.textContent = 'Done';
+                        }
+                    });
+                }
             } else if (info.isLocal) {
                 // Local providers: show base_url, optionally hide API key
                 baseUrlField.style.display = '';
@@ -3205,7 +3263,6 @@ Write important context, facts, and information here...
                 document.getElementById('wizardBaseUrl').placeholder = info.placeholder || 'http://localhost:8000/v1';
                 document.getElementById('wizardBaseUrlHint').innerHTML = info.hint || '';
 
-                // Custom still needs an API key; vLLM does not
                 if (info.fields && info.fields.includes('api_key')) {
                     keyField.style.display = '';
                     document.getElementById('wizardKeyLabel').textContent = 'API KEY (optional)';
@@ -3223,6 +3280,110 @@ Write important context, facts, and information here...
                 document.getElementById('wizardKeyLabel').textContent = info.label || 'API KEY';
                 document.getElementById('wizardApiKey').placeholder = info.placeholder || 'sk-...';
                 document.getElementById('wizardKeyHint').innerHTML = info.hint || '';
+            }
+        }
+
+        let _oauthCurrentProvider = null;
+
+        async function startOAuthFromWizard() {
+            const selectedPill = document.querySelector('.provider-pill.selected');
+            const provider = selectedPill ? selectedPill.dataset.provider : null;
+            if (!provider) return;
+            _oauthCurrentProvider = provider;
+
+            const statusEl = document.getElementById('wizardOAuthStatus');
+            const startBtn = document.getElementById('wizardOAuthStartBtn');
+            const submitBtn = document.getElementById('wizardOAuthSubmitBtn');
+            const codeField = document.getElementById('wizardOAuthCodeField');
+
+            startBtn.disabled = true;
+            startBtn.textContent = 'Starting...';
+            statusEl.innerHTML = 'Initiating OAuth flow...';
+
+            const result = await NanobotAPI.oauthStart(provider);
+
+            if (!result) {
+                statusEl.innerHTML = '<span style="color:var(--danger-600);">Failed to start OAuth flow. Check server logs.</span>';
+                startBtn.disabled = false;
+                startBtn.textContent = 'Retry';
+                return;
+            }
+
+            if (provider === 'openai_codex') {
+                const url = result.authUrl;
+                statusEl.innerHTML =
+                    '<strong>Step 1:</strong> Open this link in your browser and log in with OpenAI:<br>' +
+                    `<a href="${url}" target="_blank" style="color:var(--primary-600);word-break:break-all;">${url.substring(0, 80)}...</a><br><br>` +
+                    '<strong>Step 2:</strong> After logging in, you will be redirected. Paste the full callback URL or authorization code below.';
+                codeField.style.display = '';
+                startBtn.style.display = 'none';
+                submitBtn.style.display = '';
+            } else if (provider === 'github_copilot') {
+                let html = '<strong>GitHub Copilot Device Flow</strong><br>';
+                if (result.deviceUrl) {
+                    html += `Open: <a href="${result.deviceUrl}" target="_blank" style="color:var(--primary-600);">${result.deviceUrl}</a><br>`;
+                }
+                if (result.deviceCode) {
+                    html += `Enter code: <code style="background:var(--bg-base);padding:4px 10px;border-radius:4px;font-size:16px;font-weight:700;letter-spacing:2px;">${result.deviceCode}</code><br>`;
+                }
+                if (result.output && result.output.length) {
+                    html += '<br><details><summary style="cursor:pointer;font-size:12px;color:var(--text-muted);">Server output</summary><pre style="font-size:11px;max-height:150px;overflow:auto;margin-top:4px;padding:8px;background:var(--bg-base);border-radius:4px;">' +
+                        result.output.join('\n') + '</pre></details>';
+                }
+                if (result.done && result.success !== false) {
+                    html += '<br><span style="color:var(--success-600);font-weight:600;">Authentication complete!</span>';
+                    submitBtn.style.display = 'none';
+                    document.getElementById('wizardSaveBtn').style.display = '';
+                    document.getElementById('wizardSaveBtn').textContent = 'Done';
+                } else {
+                    html += '<br>Complete the login in your browser, then click "Check Status".';
+                    startBtn.textContent = 'Check Status';
+                    startBtn.disabled = false;
+                    startBtn.style.display = '';
+                }
+                statusEl.innerHTML = html;
+            }
+        }
+
+        async function submitOAuthFromWizard() {
+            const code = document.getElementById('wizardOAuthCode').value.trim();
+            if (!code) {
+                toast('Please paste the callback URL or authorization code');
+                return;
+            }
+
+            const statusEl = document.getElementById('wizardOAuthStatus');
+            const submitBtn = document.getElementById('wizardOAuthSubmitBtn');
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Verifying...';
+
+            const result = await NanobotAPI.oauthCallback(_oauthCurrentProvider, code);
+
+            if (result && result.authenticated) {
+                statusEl.innerHTML =
+                    '<span style="color:var(--success-600);font-weight:600;">Authenticated successfully!</span>' +
+                    (result.accountId ? ` &mdash; ${result.accountId}` : '');
+                submitBtn.style.display = 'none';
+                document.getElementById('wizardOAuthCodeField').style.display = 'none';
+
+                // Enable the provider in local state
+                if (!state.providers[_oauthCurrentProvider]) state.providers[_oauthCurrentProvider] = { enabled: false, fields: {} };
+                state.providers[_oauthCurrentProvider].enabled = true;
+                renderProviders();
+                updateStats();
+                saveState();
+                syncConfig();
+
+                // Show done button
+                const saveBtn = document.getElementById('wizardSaveBtn');
+                saveBtn.style.display = '';
+                saveBtn.textContent = 'Done';
+                saveBtn.onclick = dismissWizard;
+            } else {
+                const errMsg = result?.error || 'Authentication failed. Check the code and try again.';
+                statusEl.innerHTML += `<br><span style="color:var(--danger-600);">${errMsg}</span>`;
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Submit Code';
             }
         }
 
@@ -3408,6 +3569,12 @@ Write important context, facts, and information here...
                     </div>
                 ` : '';
                 const note = p.note ? `<div class="provider-note">${p.note}</div>` : '';
+                const oauthBtn = p.isOAuth ? `
+                    <button class="btn btn-primary" style="margin-top:8px;font-size:12px;padding:6px 16px;" onclick="startProviderOAuth('${p.id}')">
+                        Login with OAuth
+                    </button>
+                    <div id="oauthStatus_${p.id}" style="margin-top:6px;font-size:12px;"></div>
+                ` : '';
                 return `
                     <div class="provider-card ${enabled ? 'enabled' : ''} color-${p.color}" data-id="${p.id}">
                         <div class="provider-header">
@@ -3425,6 +3592,7 @@ Write important context, facts, and information here...
                         <div class="provider-config">
                             ${fields}
                             ${caching}
+                            ${oauthBtn}
                             ${note}
                         </div>
                     </div>
@@ -3826,6 +3994,86 @@ Write important context, facts, and information here...
             syncConfig();
             emitEvent('toggleProvider', { id, enabled: state.providers[id].enabled });
             if (NanobotAPI.connected) saveToBackend('providers', id);
+        }
+
+        async function startProviderOAuth(providerId) {
+            if (!NanobotAPI.connected) {
+                toast('Not connected to backend');
+                return;
+            }
+
+            const statusEl = document.getElementById(`oauthStatus_${providerId}`);
+            if (!statusEl) return;
+
+            // First check current status
+            const currentStatus = await NanobotAPI.oauthStatus(providerId);
+            if (currentStatus && currentStatus.authenticated) {
+                statusEl.innerHTML = '<span style="color:var(--success-600);font-weight:600;">Already authenticated</span>' +
+                    (currentStatus.accountId ? ` — ${currentStatus.accountId}` : '');
+                return;
+            }
+
+            statusEl.innerHTML = 'Starting OAuth flow...';
+            const result = await NanobotAPI.oauthStart(providerId);
+            if (!result) {
+                statusEl.innerHTML = '<span style="color:var(--danger-600);">Failed to start OAuth flow</span>';
+                return;
+            }
+
+            if (providerId === 'openai_codex') {
+                const url = result.authUrl;
+                statusEl.innerHTML =
+                    '<strong>1.</strong> <a href="' + url + '" target="_blank" style="color:var(--primary-600);">Click here to log in with OpenAI</a><br>' +
+                    '<strong>2.</strong> Paste the callback URL below:<br>' +
+                    '<input type="text" id="oauthCodeInput_' + providerId + '" placeholder="Paste callback URL or code..." ' +
+                    'style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:4px;font-family:monospace;font-size:12px;margin:6px 0;">' +
+                    '<button class="btn btn-primary" style="font-size:11px;padding:4px 12px;" ' +
+                    'onclick="submitProviderOAuth(\'' + providerId + '\')">Submit</button>';
+            } else if (providerId === 'github_copilot') {
+                let html = '';
+                if (result.deviceUrl) {
+                    html += 'Open: <a href="' + result.deviceUrl + '" target="_blank" style="color:var(--primary-600);">' + result.deviceUrl + '</a><br>';
+                }
+                if (result.deviceCode) {
+                    html += 'Code: <code style="font-size:14px;font-weight:700;letter-spacing:1px;">' + result.deviceCode + '</code><br>';
+                }
+                if (result.done) {
+                    html += '<span style="color:var(--success-600);font-weight:600;">Authenticated!</span>';
+                } else {
+                    html += '<button class="btn btn-secondary" style="font-size:11px;padding:4px 12px;margin-top:4px;" ' +
+                        'onclick="startProviderOAuth(\'' + providerId + '\')">Check Status</button>';
+                }
+                if (result.output && result.output.length) {
+                    html += '<details style="margin-top:4px;"><summary style="cursor:pointer;font-size:11px;color:var(--text-muted);">Output</summary>' +
+                        '<pre style="font-size:10px;max-height:100px;overflow:auto;padding:6px;background:var(--bg-base);border-radius:4px;">' +
+                        result.output.join('\n') + '</pre></details>';
+                }
+                statusEl.innerHTML = html;
+            }
+        }
+
+        async function submitProviderOAuth(providerId) {
+            const input = document.getElementById(`oauthCodeInput_${providerId}`);
+            const statusEl = document.getElementById(`oauthStatus_${providerId}`);
+            if (!input || !input.value.trim()) {
+                toast('Please paste the callback URL or code');
+                return;
+            }
+
+            statusEl.innerHTML += '<br>Verifying...';
+            const result = await NanobotAPI.oauthCallback(providerId, input.value.trim());
+
+            if (result && result.authenticated) {
+                statusEl.innerHTML = '<span style="color:var(--success-600);font-weight:600;">Authenticated!</span>' +
+                    (result.accountId ? ` — ${result.accountId}` : '');
+                // Enable provider
+                if (!state.providers[providerId]) state.providers[providerId] = { enabled: false, fields: {} };
+                state.providers[providerId].enabled = true;
+                toast(providerId.replace(/_/g, ' ') + ' authenticated');
+                setTimeout(() => { renderProviders(); updateStats(); saveState(); syncConfig(); }, 1000);
+            } else {
+                statusEl.innerHTML += '<br><span style="color:var(--danger-600);">' + (result?.error || 'Failed') + '</span>';
+            }
         }
 
         function toggleChannel(id) {
