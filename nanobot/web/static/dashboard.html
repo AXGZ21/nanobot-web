@@ -3105,7 +3105,7 @@ Write important context, facts, and information here...
         const tools = [
             { id: 'shell', name: 'Shell', description: 'Execute shell commands', fields: [{ name: 'timeout', type: 'number', label: 'Timeout (seconds)', default: 60 }] },
             { id: 'filesystem', name: 'Filesystem', description: 'File operations and management', fields: [] },
-            { id: 'websearch', name: 'Web Search', description: 'Search the web', fields: [{ name: 'api_key', type: 'password', label: 'API Key', default: '' }] },
+            { id: 'websearch', name: 'Web Search', description: 'Search the web (Brave Search API)', fields: [{ name: 'api_key', type: 'password', label: 'Brave Search API Key', default: '' }], note: 'Get a free key at <a href="https://brave.com/search/api/" target="_blank" style="color:var(--primary-600)">brave.com/search/api</a> — 2,000 queries/month free' },
             { id: 'cron', name: 'Cron Scheduler', description: 'Schedule recurring tasks', fields: [], note: 'Natural language parsing supported' },
             { id: 'spawn', name: 'Spawn/Subagents', description: 'Create subagent instances', fields: [{ name: 'max_concurrent', type: 'number', label: 'Max Concurrent', default: 3 }] },
             { id: 'mcp', name: 'MCP Servers', description: 'Model Context Protocol servers', fields: [], hasButton: true }
