@@ -95,7 +95,7 @@ def _get_session_from_request(request: web.Request) -> str | None:
 # Auth middleware
 # ============================================================================
 
-PUBLIC_PATHS = {"/api/auth/login", "/api/auth/status", "/api/auth/setup"}
+PUBLIC_PATHS = {"/api/auth/login", "/api/auth/status", "/api/auth/setup", "/api/status"}
 
 
 def _is_local_request(request: web.Request) -> bool:
@@ -124,13 +124,12 @@ async def auth_middleware(request: web.Request, handler):
     if _is_local_request(request):
         return await handler(request)
 
-    # If no password is set, redirect to setup (force password creation)
+    # If no password is set, force setup
     if not _has_password():
         if path == "/" or path.startswith("/static"):
             raise web.HTTPFound("/api/auth/login")
-        if path.startswith("/api/") or path.startswith("/ws/"):
-            return web.json_response({"error": "Password not set. Visit the dashboard to create one."}, status=401)
-        return await handler(request)
+        # Block all API/WS and other paths until password is configured
+        return web.json_response({"error": "Password not set. Visit the dashboard to create one."}, status=401)
 
     # Check session
     token = _get_session_from_request(request)

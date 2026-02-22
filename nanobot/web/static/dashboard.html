@@ -3601,9 +3601,15 @@ Write important context, facts, and information here...
         function collectCardFields(cardEl) {
             const vals = {};
             cardEl.querySelectorAll('.form-input, .form-select, .form-textarea').forEach(inp => {
-                const label = inp.closest('.form-group')?.querySelector('.form-label');
-                if (label) {
-                    const key = label.textContent.trim().toLowerCase().replace(/\s+/g, '_');
+                // Prefer explicit data-field-name attribute over label-derived key
+                let key = inp.dataset.fieldName;
+                if (!key) {
+                    const label = inp.closest('.form-group')?.querySelector('.form-label');
+                    if (label) {
+                        key = label.textContent.trim().toLowerCase().replace(/\s+/g, '_');
+                    }
+                }
+                if (key) {
                     vals[key] = inp.value;
                 }
             });
@@ -3621,11 +3627,14 @@ Write important context, facts, and information here...
         function restoreCardFields(cardEl, vals) {
             if (!vals) return;
             cardEl.querySelectorAll('.form-input, .form-select, .form-textarea').forEach(inp => {
-                const label = inp.closest('.form-group')?.querySelector('.form-label');
-                if (label) {
-                    const key = label.textContent.trim().toLowerCase().replace(/\s+/g, '_');
-                    if (vals[key] !== undefined) inp.value = vals[key];
+                let key = inp.dataset.fieldName;
+                if (!key) {
+                    const label = inp.closest('.form-group')?.querySelector('.form-label');
+                    if (label) {
+                        key = label.textContent.trim().toLowerCase().replace(/\s+/g, '_');
+                    }
                 }
+                if (key && vals[key] !== undefined) inp.value = vals[key];
             });
             cardEl.querySelectorAll('.form-checkbox input[type="checkbox"]').forEach(cb => {
                 const label = cb.closest('.form-checkbox')?.querySelector('label');
@@ -3675,7 +3684,7 @@ Write important context, facts, and information here...
                 const fields = p.fields.map(f => `
                     <div class="form-group">
                         <label class="form-label">${f.replace(/_/g, ' ').toUpperCase()}</label>
-                        <input type="${f.includes('key') || f.includes('token') || f.includes('secret') ? 'password' : 'text'}" class="form-input mono" placeholder="${f}" onchange="onFieldChange('providers','${p.id}')">
+                        <input type="${f.includes('key') || f.includes('token') || f.includes('secret') ? 'password' : 'text'}" class="form-input mono" data-field-name="${f}" placeholder="${f}" onchange="onFieldChange('providers','${p.id}')">
                     </div>
                 `).join('');
                 const caching = p.promptCaching ? `
@@ -3731,7 +3740,7 @@ Write important context, facts, and information here...
                 const fields = c.fields.map(f => `
                     <div class="form-group">
                         <label class="form-label">${f.replace(/_/g, ' ').toUpperCase()}</label>
-                        <input type="${f.includes('token') || f.includes('secret') || f.includes('password') ? 'password' : 'text'}" class="form-input mono" placeholder="${f}" onchange="onFieldChange('channels','${c.id}')">
+                        <input type="${f.includes('token') || f.includes('secret') || f.includes('password') ? 'password' : 'text'}" class="form-input mono" data-field-name="${f}" placeholder="${f}" onchange="onFieldChange('channels','${c.id}')">
                     </div>
                 `).join('');
                 const qrButton = c.hasQrScan ? '<button class="btn btn-primary whatsapp-qr-button">Start QR Scan</button>' : '';
@@ -3739,11 +3748,11 @@ Write important context, facts, and information here...
                     <div class="form-grid-2">
                         <div class="form-group">
                             <label class="form-label">Allow From</label>
-                            <input type="text" class="form-input mono" placeholder="user_id1,user_id2" value="${cState.fields?.allow_from || ''}" onchange="onFieldChange('channels','${c.id}')">
+                            <input type="text" class="form-input mono" data-field-name="allow_from" placeholder="user_id1,user_id2" value="${cState.fields?.allow_from || ''}" onchange="onFieldChange('channels','${c.id}')">
                         </div>
                         <div class="form-group">
                             <label class="form-label">Group Policy</label>
-                            <select class="form-select" onchange="onFieldChange('channels','${c.id}')">
+                            <select class="form-select" data-field-name="group_policy" onchange="onFieldChange('channels','${c.id}')">
                                 <option ${(cState.fields?.group_policy||'mention')==='mention'?'selected':''}>mention</option>
                                 <option ${cState.fields?.group_policy==='open'?'selected':''}>open</option>
                                 <option ${cState.fields?.group_policy==='allowlist'?'selected':''}>allowlist</option>
@@ -3791,7 +3800,7 @@ Write important context, facts, and information here...
                 const fields = t.fields ? t.fields.map(f => `
                     <div class="form-group">
                         <label class="form-label">${f.label}</label>
-                        <input type="${f.type}" class="form-input ${f.type === 'password' ? 'mono' : ''}" value="${tState.fields?.[f.name] ?? f.default}" placeholder="${f.label}" onchange="onFieldChange('tools','${t.id}')">
+                        <input type="${f.type}" class="form-input ${f.type === 'password' ? 'mono' : ''}" data-field-name="${f.name}" value="${tState.fields?.[f.name] ?? f.default}" placeholder="${f.label}" onchange="onFieldChange('tools','${t.id}')">
                     </div>
                 `).join('') : '';
                 const button = t.hasButton ? '<button class="btn btn-primary mt-16" onclick="openModal(\'addMcpModal\')">Add MCP Server</button>' : '';
