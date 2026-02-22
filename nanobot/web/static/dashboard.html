@@ -3090,41 +3090,6 @@ Write important context, facts, and information here...
                 }
             }
 
-            // Try connecting to backend
-            const loaded = await NanobotAPI.loadConfig();
-            if (loaded) {
-                NanobotAPI.connectEvents();
-                // Load skills from backend
-                const skills = await NanobotAPI.loadSkills();
-                if (skills) {
-                    state.skills = skills.map(s => ({ name: s.name, summary: s.description || '', enabled: true, content: '' }));
-                    renderSkillsTable();
-                }
-                // Load memory from backend
-                const mem = await NanobotAPI.loadMemory();
-                if (mem) {
-                    state.memory = mem.memory || '';
-                    const memEditor = document.getElementById('memoryContent');
-                    if (memEditor) memEditor.value = state.memory;
-                }
-                // Load cron from backend
-                const jobs = await NanobotAPI.loadCronJobs();
-                if (jobs) {
-                    state.cronJobs = jobs.map(j => ({
-                        id: j.id,
-                        schedule: j.schedule.expr || (j.schedule.everyMs ? `every ${j.schedule.everyMs/1000}s` : 'one-time'),
-                        task: j.payload.message,
-                        active: j.enabled,
-                    }));
-                    renderCronTable();
-                }
-                // Update status
-                const status = await NanobotAPI.getStatus();
-                if (status) {
-                    document.getElementById('pageTitle').textContent = `Overview — ${status.version}`;
-                }
-            }
-
             // Check if setup wizard should be shown
             if (NanobotAPI.connected) {
                 const hasAnyKey = Object.values(state.providers).some(p => p.enabled || p.fields?.api_key);
