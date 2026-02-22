@@ -34,7 +34,9 @@ def _get_password_hash_path() -> Path:
 
 def _get_configured_password() -> str | None:
     """Get the dashboard password from env var or stored hash."""
-    return os.environ.get("NANOBOT_PASSWORD")
+    pw = os.environ.get("NANOBOT_PASSWORD")
+    logger.info(f"[AUTH] NANOBOT_PASSWORD env var: {'SET (length=' + str(len(pw)) + ')' if pw else 'NOT SET'}")
+    return pw
 
 
 def _get_stored_hash() -> str | None:
@@ -65,7 +67,11 @@ def _check_password(password: str) -> bool:
 
 def _has_password() -> bool:
     """Check if any password is configured."""
-    return bool(_get_configured_password()) or bool(_get_stored_hash())
+    env_pw = _get_configured_password()
+    stored_hash = _get_stored_hash()
+    has_pw = bool(env_pw) or bool(stored_hash)
+    logger.info(f"[AUTH] _has_password: env={bool(env_pw)}, stored={bool(stored_hash)} -> {has_pw}")
+    return has_pw
 
 
 def _set_password(password: str) -> None:
