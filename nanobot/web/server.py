@@ -22,9 +22,9 @@ STATIC_DIR = Path(__file__).parent / "static"
 _sessions: set[str] = set()
 
 
-# ============================================================================
+# =============================================================================
 # Authentication helpers
-# ============================================================================
+# =============================================================================
 
 def _get_password_hash_path() -> Path:
     """Path to stored password hash."""
@@ -56,11 +56,12 @@ def _check_password(password: str) -> bool:
     """Check password against env var or stored hash."""
     env_pw = _get_configured_password()
     if env_pw:
-        return password == env_pw
+        # Hash both sides so comparison is consistent regardless of how password was set
+        return secrets.compare_digest(_hash_password(password), _hash_password(env_pw))
 
     stored = _get_stored_hash()
     if stored:
-        return _hash_password(password) == stored
+        return secrets.compare_digest(_hash_password(password), stored)
 
     return False
 
@@ -97,444 +98,170 @@ def _get_session_from_request(request: web.Request) -> str | None:
     return None
 
 
-# ============================================================================
+# =============================================================================
 # Auth middleware
-# ============================================================================
-
-PUBLIC_PATHS = {"/api/auth/login", "/api/auth/status", "/api/auth/setup", "/api/status"}
-
-
-def _is_local_request(request: web.Request) -> bool:
-    """Check if the request is truly from localhost (not through a reverse proxy)."""
-    # If there's an X-Forwarded-For header, this is proxied — NOT local
-    if request.headers.get("X-Forwarded-For"):
-        return False
-    if request.headers.get("X-Real-IP"):
-        return False
-
-    peername = request.transport.get_extra_info("peername")
-    return bool(peername and peername[0] in ("127.0.0.1", "::1"))
-
+# =============================================================================
 
 @web.middleware
 async def auth_middleware(request: web.Request, handler):
-    """Require authentication for all routes except login."""
-    path = request.path
-
-    # Public paths — always allowed
-    if path in PUBLIC_PATHS:
+    """Protect all routes except /login and /api/set-password."""
+    # Allow static files
+    if request.path.startswith("/static/"):
         return await handler(request)
 
-    # Localhost requests from the agent's self-admin skill bypass auth
-    # Only truly local connections (not proxied through Railway/nginx)
-    if _is_local_request(request):
+    # Allow login page
+    if request.path == "/login":
         return await handler(request)
 
-    # If no password is set, force setup
+    # Allow set-password endpoint (for first-run setup)
+    if request.path == "/api/set-password":
+        return await handler(request)
+
+    # Allow health check endpoint
+    if request.path == "/health":
+        return await handler(request)
+
+    # If no password is configured, allow all requests (first-run)
     if not _has_password():
-        if path == "/" or path.startswith("/static"):
-            raise web.HTTPFound("/api/auth/login")
-        # Block all API/WS and other paths until password is configured
-        return web.json_response({"error": "Password not set. Visit the dashboard to create one."}, status=401)
+        logger.warning("[AUTH] No password configured - allowing unauthenticated access")
+        return await handler(request)
 
     # Check session
-    token = _get_session_from_request(request)
-    if token and token in _sessions:
-        return await handler(request)
+    session = _get_session_from_request(request)
+    if not session or session not in _sessions:
+        # Return 401 for API requests, redirect to /login for browser requests
+        if request.path.startswith("/api/") or request.path.startswith("/ws"):
+            return web.json_response({"error": "Unauthorized"}, status=401)
+        return web.HTTPFound("/login")
 
-    # Not authenticated
-    if path == "/" or path.startswith("/static"):
-        # Redirect browser to login
-        raise web.HTTPFound("/api/auth/login?redirect=" + path)
-
-    return web.json_response({"error": "Unauthorized"}, status=401)
+    return await handler(request)
 
 
-# ============================================================================
-# Auth endpoints
-# ============================================================================
+# =============================================================================
+# Routes
+# =============================================================================
 
-async def auth_status(request: web.Request) -> web.Response:
-    """GET /api/auth/status — check if auth is required and if session is valid."""
-    has_pw = _has_password()
-    token = _get_session_from_request(request)
-    authenticated = bool(token and token in _sessions) if has_pw else True
+async def login_page(request: web.Request):
+    """Serve the login page."""
+    return web.FileResponse(STATIC_DIR / "login.html")
 
+
+async def login_handler(request: web.Request):
+    """Handle login POST."""
+    data = await request.json()
+    password = data.get("password", "")
+
+    if _check_password(password):
+        # Create session
+        token = secrets.token_urlsafe(32)
+        _sessions.add(token)
+        
+        # Set cookie
+        response = web.json_response({"success": True})
+        response.set_cookie(
+            "nanobot_session",
+            token,
+            max_age=30 * 24 * 60 * 60,  # 30 days
+            httponly=True,
+            secure=request.scheme == "https",
+            samesite="Lax"
+        )
+        return response
+    
+    return web.json_response({"error": "Invalid password"}, status=401)
+
+
+async def logout_handler(request: web.Request):
+    """Handle logout POST."""
+    session = _get_session_from_request(request)
+    if session:
+        _sessions.discard(session)
+    
+    response = web.json_response({"success": True})
+    response.del_cookie("nanobot_session")
+    return response
+
+
+async def set_password_handler(request: web.Request):
+    """Set password on first run (only if no password exists)."""
+    if _has_password():
+        return web.json_response({"error": "Password already set"}, status=403)
+    
+    data = await request.json()
+    password = data.get("password", "")
+    
+    if not password or len(password) < 4:
+        return web.json_response({"error": "Password must be at least 4 characters"}, status=400)
+    
+    _set_password(password)
+    logger.info("[AUTH] Password set via first-run setup")
+    
+    return web.json_response({"success": True})
+
+
+async def check_auth_status(request: web.Request):
+    """Check if password is configured."""
     return web.json_response({
-        "passwordRequired": has_pw,
-        "authenticated": authenticated,
+        "has_password": _has_password(),
+        "authenticated": bool(_get_session_from_request(request) and _get_session_from_request(request) in _sessions)
     })
 
 
-async def auth_login(request: web.Request) -> web.Response:
-    """POST /api/auth/login — authenticate with password.
-    GET /api/auth/login — serve the login page.
-    """
-    if request.method == "GET":
-        return web.Response(
-            text=_LOGIN_PAGE_HTML,
-            content_type="text/html",
-        )
-
-    try:
-        body = await request.json()
-    except json.JSONDecodeError:
-        return web.json_response({"error": "Invalid JSON"}, status=400)
-
-    password = body.get("password", "")
-    if not password:
-        return web.json_response({"error": "Password is required"}, status=400)
-
-    if not _check_password(password):
-        return web.json_response({"error": "Invalid password"}, status=401)
-
-    # Create session
-    token = secrets.token_hex(32)
-    _sessions.add(token)
-
-    resp = web.json_response({"ok": True, "token": token})
-    resp.set_cookie(
-        "nanobot_session", token,
-        max_age=60 * 60 * 24 * 30,  # 30 days
-        httponly=True,
-        samesite="Lax",
-    )
-    return resp
+async def index_handler(request: web.Request):
+    """Serve the main dashboard."""
+    return web.FileResponse(STATIC_DIR / "index.html")
 
 
-async def auth_setup(request: web.Request) -> web.Response:
-    """POST /api/auth/setup — set password for the first time."""
-    if _has_password():
-        return web.json_response({"error": "Password already set. Use login instead."}, status=400)
-
-    try:
-        body = await request.json()
-    except json.JSONDecodeError:
-        return web.json_response({"error": "Invalid JSON"}, status=400)
-
-    password = body.get("password", "")
-    if len(password) < 4:
-        return web.json_response({"error": "Password must be at least 4 characters"}, status=400)
-
-    _set_password(password)
-
-    # Auto-login
-    token = secrets.token_hex(32)
-    _sessions.add(token)
-
-    resp = web.json_response({"ok": True, "token": token})
-    resp.set_cookie(
-        "nanobot_session", token,
-        max_age=60 * 60 * 24 * 30,
-        httponly=True,
-        samesite="Lax",
-    )
-    return resp
+async def health_handler(request: web.Request):
+    """Health check endpoint."""
+    return web.json_response({"status": "ok"})
 
 
-async def auth_logout(request: web.Request) -> web.Response:
-    """POST /api/auth/logout — destroy session."""
-    token = _get_session_from_request(request)
-    if token:
-        _sessions.discard(token)
-    resp = web.json_response({"ok": True})
-    resp.del_cookie("nanobot_session")
-    return resp
-
-
-# ============================================================================
-# Login page HTML
-# ============================================================================
-
-_LOGIN_PAGE_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Nanobot — Login</title>
-<style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        background: #f8f9fb;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        min-height: 100vh;
-        color: #1a1a2e;
-    }
-    .login-card {
-        background: #fff;
-        border: 1px solid #e2e4e9;
-        border-radius: 16px;
-        padding: 40px;
-        width: 100%;
-        max-width: 400px;
-        box-shadow: 0 4px 24px rgba(0,0,0,0.06);
-    }
-    .login-card h1 {
-        font-size: 24px;
-        font-weight: 700;
-        margin-bottom: 4px;
-    }
-    .login-card .subtitle {
-        color: #6b7280;
-        font-size: 14px;
-        margin-bottom: 28px;
-    }
-    label {
-        display: block;
-        font-size: 11px;
-        font-weight: 600;
-        text-transform: uppercase;
-        color: #6b7280;
-        margin-bottom: 6px;
-        letter-spacing: 0.5px;
-    }
-    input {
-        width: 100%;
-        padding: 10px 14px;
-        border: 1px solid #e2e4e9;
-        border-radius: 8px;
-        font-size: 15px;
-        outline: none;
-        transition: border-color 0.2s;
-    }
-    input:focus { border-color: #6366f1; }
-    .btn {
-        width: 100%;
-        padding: 12px;
-        background: #6366f1;
-        color: #fff;
-        border: none;
-        border-radius: 8px;
-        font-size: 15px;
-        font-weight: 600;
-        cursor: pointer;
-        margin-top: 20px;
-        transition: background 0.2s;
-    }
-    .btn:hover { background: #4f46e5; }
-    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
-    .error {
-        color: #dc2626;
-        font-size: 13px;
-        margin-top: 12px;
-        display: none;
-    }
-    .setup-note {
-        font-size: 12px;
-        color: #6b7280;
-        margin-top: 16px;
-        text-align: center;
-    }
-</style>
-</head>
-<body>
-<div class="login-card">
-    <h1>Nanobot</h1>
-    <div class="subtitle" id="subtitle">Enter your dashboard password</div>
-
-    <div id="loginForm">
-        <label for="password">PASSWORD</label>
-        <input type="password" id="password" placeholder="Enter password..." autofocus>
-        <div id="confirmGroup" style="display:none;margin-top:14px;">
-            <label for="confirmPassword">CONFIRM PASSWORD</label>
-            <input type="password" id="confirmPassword" placeholder="Confirm password...">
-        </div>
-        <button class="btn" id="submitBtn" onclick="submit()">Login</button>
-        <div class="error" id="errorMsg"></div>
-    </div>
-
-    <div class="setup-note" id="setupNote" style="display:none;">
-        Choose a password to protect your dashboard.
-    </div>
-</div>
-<script>
-    let isSetup = false;
-
-    async function checkStatus() {
-        try {
-            const res = await fetch('/api/auth/status');
-            if (!res.ok) {
-                // Auth endpoint error - show message, don't loop
-                return;
-            }
-            const data = await res.json();
-            // Check if setup is needed FIRST (before checking auth)
-            if (!data.passwordRequired) {
-                isSetup = true;
-                document.getElementById('subtitle').textContent = 'Create a dashboard password';
-                document.getElementById('confirmGroup').style.display = '';
-                document.getElementById('submitBtn').textContent = 'Set Password & Continue';
-                document.getElementById('setupNote').style.display = '';
-                return;
-            }
-            // If password is required and user is already authenticated, redirect to dashboard
-            if (data.authenticated) {
-                window.location.href = '/';
-                return;
-            }
-            // Otherwise show login form
-        } catch (e) {
-            // Network error - show login form, don't loop
-            console.error('Auth check failed:', e);
-        }
-    }
-
-    async function submit() {
-        const pw = document.getElementById('password').value;
-        const errEl = document.getElementById('errorMsg');
-        errEl.style.display = 'none';
-
-        if (!pw) {
-            errEl.textContent = 'Please enter a password';
-            errEl.style.display = '';
-            return;
-        }
-
-        if (isSetup) {
-            const confirm = document.getElementById('confirmPassword').value;
-            if (pw !== confirm) {
-                errEl.textContent = 'Passwords do not match';
-                errEl.style.display = '';
-                return;
-            }
-            if (pw.length < 4) {
-                errEl.textContent = 'Password must be at least 4 characters';
-                errEl.style.display = '';
-                return;
-            }
-            const res = await fetch('/api/auth/setup', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password: pw }),
-            });
-            const data = await res.json();
-            if (data.ok) {
-                window.location.href = '/';
-            } else {
-                errEl.textContent = data.error || 'Setup failed';
-                errEl.style.display = '';
-            }
-        } else {
-            const res = await fetch('/api/auth/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password: pw }),
-            });
-            const data = await res.json();
-            if (data.ok) {
-                window.location.href = '/';
-            } else {
-                errEl.textContent = data.error || 'Login failed';
-                errEl.style.display = '';
-            }
-        }
-    }
-
-    document.getElementById('password').addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-            if (isSetup) document.getElementById('confirmPassword').focus();
-            else submit();
-        }
-    });
-    document.getElementById('confirmPassword').addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') submit();
-    });
-
-    checkStatus();
-</script>
-</body>
-</html>
-"""
-
-
-# ============================================================================
-# App lifecycle
-# ============================================================================
-
-async def on_startup(app: web.Application) -> None:
-    """Initialize shared resources on server start."""
-    from nanobot.config.loader import load_config, get_data_dir
-    from nanobot.bus.queue import MessageBus
-    from nanobot.cron.service import CronService
-
-    config = load_config()
-    app["nanobot_config"] = config
-    app["data_dir"] = get_data_dir()
-
-    # Message bus for agent communication
-    bus = MessageBus()
-    app["bus"] = bus
-
-    # Cron service
-    cron_store = get_data_dir() / "cron" / "jobs.json"
-    cron = CronService(cron_store)
-    app["cron"] = cron
-
-    # Agent loop (lazy — only created when chat is used)
-    app["agent"] = None
-    app["agent_lock"] = asyncio.Lock()
-
-    # WebSocket clients for event broadcasting
-    app["ws_clients"] = set()
-
-    pw_status = "password set" if _has_password() else "NO PASSWORD — first visitor will set one"
-    logger.info("Web dashboard ready (auth: {})", pw_status)
-
-
-async def on_shutdown(app: web.Application) -> None:
-    """Clean up on server shutdown."""
-    agent = app.get("agent")
-    if agent:
-        agent.stop()
-        await agent.close_mcp()
-
-    cron = app.get("cron")
-    if cron:
-        cron.stop()
-
-    # Close all WebSocket connections
-    for ws in set(app.get("ws_clients", [])):
-        await ws.close()
-
-
-async def index_handler(request: web.Request) -> web.Response:
-    """Serve the dashboard HTML."""
-    dashboard = STATIC_DIR / "dashboard.html"
-    if not dashboard.exists():
-        return web.Response(text="Dashboard not found", status=404)
-    return web.FileResponse(dashboard)
-
+# =============================================================================
+# Server setup
+# =============================================================================
 
 def create_app() -> web.Application:
-    """Create and configure the aiohttp application."""
+    """Create and configure the web application."""
     app = web.Application(middlewares=[auth_middleware])
-
-    app.on_startup.append(on_startup)
-    app.on_shutdown.append(on_shutdown)
-
-    # Auth endpoints (registered before other routes)
-    app.router.add_route("*", "/api/auth/login", auth_login)
-    app.router.add_post("/api/auth/setup", auth_setup)
-    app.router.add_get("/api/auth/status", auth_status)
-    app.router.add_post("/api/auth/logout", auth_logout)
-
-    # Dashboard
+    
+    # Auth routes
+    app.router.add_get("/login", login_page)
+    app.router.add_post("/api/login", login_handler)
+    app.router.add_post("/api/logout", logout_handler)
+    app.router.add_post("/api/set-password", set_password_handler)
+    app.router.add_get("/api/auth-status", check_auth_status)
+    app.router.add_get("/health", health_handler)
+    
+    # Main dashboard
     app.router.add_get("/", index_handler)
-
-    # Static files
-    if STATIC_DIR.exists():
-        app.router.add_static("/static", STATIC_DIR)
-
-    # REST + WebSocket API
+    
+    # API routes (tasks, websocket, etc.)
     setup_routes(app)
-
+    
+    # Static files
+    app.router.add_static("/static/", STATIC_DIR)
+    
     return app
 
 
-def run_server(host: str = "0.0.0.0", port: int = 1890) -> None:
+async def start_server(host: str = "0.0.0.0", port: int = 8080):
     """Start the web server."""
     app = create_app()
-    web.run_app(app, host=host, port=port, print=lambda msg: logger.info(msg))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host, port)
+    await site.start()
+    
+    logger.info(f"🌐 Web server running at http://{host}:{port}")
+    logger.info(f"   Dashboard: http://localhost:{port}/")
+    
+    # Keep running
+    try:
+        await asyncio.Event().wait()
+    finally:
+        await runner.cleanup()
+
+
+if __name__ == "__main__":
+    asyncio.run(start_server())
