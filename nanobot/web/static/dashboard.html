@@ -1984,12 +1984,9 @@
                                 </div>
                                 <div class="form-group">
                                     <label class="form-label">Model</label>
-                                    <div class="model-combo" id="modelCombo" style="position:relative;">
-                                        <input type="text" class="form-input mono" id="agentModel" placeholder="Type or select a model..." autocomplete="off" oninput="onModelInput()" onfocus="showModelDropdown()" onchange="syncConfig()">
-                                        <div id="modelDropdown" class="model-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:240px;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;box-shadow:var(--shadow-md);z-index:100;"></div>
-                                        <div id="modelLoading" style="display:none;position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:12px;color:var(--text-muted);">Loading...</div>
-                                    </div>
-                                    <div class="field-hint" style="font-size:11px;color:var(--text-muted);margin-top:4px;" id="modelHint">Select a provider to see available models, or type any model name.</div>
+                                    <select class="form-select mono" id="agentModel" onchange="syncConfig()">
+                                        <option value="">Loading models...</option>
+                                    </select>
                                 </div>
                             </div>
 
@@ -2560,14 +2557,11 @@ Write important context, facts, and information here...
                                     <option value="custom">Custom</option>
                                 </select>
                             </div>
-                            <div class="form-group" style="position:relative;flex:1;min-width:0;">
+                            <div class="form-group" style="flex:1;min-width:0;">
                                 <label class="form-label">Model</label>
-                                <div style="position:relative;">
-                                    <input type="text" class="form-input mono" id="chatModel" placeholder="Type or select a model..." autocomplete="off" oninput="onChatModelInput()" onfocus="showChatModelDropdown()">
-                                    <div id="chatModelDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:220px;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;box-shadow:var(--shadow-md);z-index:200;"></div>
-                                    <div id="chatModelLoading" style="display:none;position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--text-muted);">Loading...</div>
-                                </div>
-                                <div id="chatModelHint" style="font-size:11px;color:var(--text-muted);margin-top:3px;"></div>
+                                <select class="form-select mono" id="chatModel">
+                                    <option value="">Loading models...</option>
+                                </select>
                             </div>
                             <div class="chat-status">
                                 <span>●</span> Connected
@@ -2710,10 +2704,9 @@ Write important context, facts, and information here...
 
             <div class="setup-field" id="wizardModelField">
                 <label>MODEL (optional)</label>
-                <div style="position:relative;">
-                    <input type="text" id="wizardModel" placeholder="Leave blank for default..." autocomplete="off" oninput="onWizardModelInput()" onfocus="showWizardModelDropdown()" style="width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:8px;font-family:'JetBrains Mono',monospace;font-size:13px;box-sizing:border-box;">
-                    <div id="wizardModelDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:200px;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;box-shadow:var(--shadow-md);z-index:300;"></div>
-                </div>
+                <select id="wizardModel" style="width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:8px;font-family:'JetBrains Mono',monospace;font-size:13px;box-sizing:border-box;background:var(--bg-surface);color:var(--text-primary);">
+                    <option value="">Use default model</option>
+                </select>
                 <div class="field-hint">Leave blank for default. Change later in Agent Config.</div>
             </div>
 
@@ -3005,7 +2998,27 @@ Write important context, facts, and information here...
             // Providers
             if (data.providers) {
                 for (const [key, pConfig] of Object.entries(data.providers)) {
-                    const id = key.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '');
+                    // Normalize backend camelCase keys to match frontend provider IDs
+                    // e.g. "openRouter" -> "openrouter", "openAi" -> "openai",
+                    //      "aiHubMix" -> "aihubmix", "gitHubCopilot" -> "github_copilot",
+                    //      "openaiCodex" -> "openai_codex"
+                    let id = key.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '');
+                    // Fix known mismatches from camelCase conversion
+                    const idFixes = {
+                        'open_router': 'openrouter',
+                        'open_ai': 'openai',
+                        'deep_seek': 'deepseek',
+                        'ai_hub_mix': 'aihubmix',
+                        'silicon_flow': 'siliconflow',
+                        'volc_engine': 'volcengine',
+                        'dash_scope': 'dashscope',
+                        'mini_max': 'minimax',
+                        'v_l_l_m': 'vllm',
+                        'openai_codex': 'openai_codex',
+                        'git_hub_copilot': 'github_copilot',
+                        'github_copilot': 'github_copilot',
+                    };
+                    id = idFixes[id] || id;
                     if (!state.providers[id]) state.providers[id] = { enabled: false, fields: {} };
                     const sp = state.providers[id];
                     sp.enabled = !!(pConfig.apiKey || pConfig.apiBase);
@@ -3041,19 +3054,6 @@ Write important context, facts, and information here...
                 state.agentConfig.workspace = d.workspace || state.agentConfig.workspace;
                 state.agentConfig.temperature = d.temperature ?? state.agentConfig.temperature;
                 state.agentConfig.max_tokens = d.maxTokens ?? state.agentConfig.max_tokens;
-                // Sync chat page model/provider from backend config
-                if (d.model) {
-                    const chatModelEl = document.getElementById('chatModel');
-                    if (chatModelEl) chatModelEl.value = d.model;
-                }
-                if (d.provider || state.agentConfig.provider) {
-                    const chatProviderEl = document.getElementById('chatProvider');
-                    const prov = d.provider || state.agentConfig.provider;
-                    if (chatProviderEl && prov) {
-                        chatProviderEl.value = prov;
-                        _loadChatModels(prov);
-                    }
-                }
                 state.agentConfig.max_iterations = d.maxToolIterations ?? state.agentConfig.max_iterations;
                 state.agentConfig.memory_window = d.memoryWindow ?? state.agentConfig.memory_window;
             }
@@ -3206,10 +3206,12 @@ Write important context, facts, and information here...
                 }
             }
 
-            // Check if setup wizard should be shown
+            // Check if setup wizard should be shown:
+            // Skip if we already connected to backend with config, or if previously dismissed.
             if (NanobotAPI.connected) {
+                const wizardDismissed = localStorage.getItem('nanobot-wizard-dismissed');
                 const hasAnyKey = Object.values(state.providers).some(p => p.enabled || p.fields?.api_key);
-                if (!hasAnyKey) {
+                if (!hasAnyKey && !wizardDismissed) {
                     showSetupWizard();
                 }
             }
@@ -3346,6 +3348,7 @@ Write important context, facts, and information here...
         function dismissWizard() {
             const el = document.getElementById('setupWizard');
             if (el) el.classList.add('hidden');
+            localStorage.setItem('nanobot-wizard-dismissed', '1');
         }
 
         function wizardSelectProvider(pill) {
@@ -3972,62 +3975,10 @@ Write important context, facts, and information here...
             `).join('');
         }
 
-        // --- Model combo-box state & functions ---
-        let _modelCache = {};       // provider -> [models]
-        let _currentModels = [];    // currently shown in dropdown
-        let _modelDropdownVisible = false;
-
-        async function onProviderChange() {
-            syncConfig();
-            const provider = document.getElementById('agentProvider')?.value;
-            if (provider) {
-                await loadModelsForProvider(provider);
-            }
-        }
-
-        async function loadModelsForProvider(provider) {
-            const loading = document.getElementById('modelLoading');
-            const hint = document.getElementById('modelHint');
-
-            // Show from cache instantly if available
-            if (_modelCache[provider]) {
-                _currentModels = _modelCache[provider];
-                renderModelDropdown(_currentModels);
-                if (hint) hint.textContent = `${_currentModels.length} models available for ${provider}`;
-                return;
-            }
-
-            // Try fetching from backend
-            if (NanobotAPI.connected) {
-                if (loading) loading.style.display = '';
-                if (hint) hint.textContent = 'Fetching models...';
-                try {
-                    const result = await NanobotAPI.fetchModels(provider);
-                    if (result && result.models) {
-                        _modelCache[provider] = result.models;
-                        _currentModels = result.models;
-                        renderModelDropdown(_currentModels);
-                        const liveTag = result.live ? ' (live)' : '';
-                        if (hint) hint.textContent = `${_currentModels.length} models available${liveTag}`;
-                    } else {
-                        _currentModels = [];
-                        renderModelDropdown([]);
-                        if (hint) hint.textContent = 'No models found. Type a model name manually.';
-                    }
-                } catch (e) {
-                    _currentModels = [];
-                    if (hint) hint.textContent = 'Could not fetch models. Type a model name manually.';
-                }
-                if (loading) loading.style.display = 'none';
-            } else {
-                // Offline — use built-in fallback lists
-                const fallback = _offlineModelLists[provider] || [];
-                _modelCache[provider] = fallback;
-                _currentModels = fallback;
-                renderModelDropdown(fallback);
-                if (hint) hint.textContent = fallback.length > 0 ? `${fallback.length} models (offline)` : 'Type a model name manually.';
-            }
-        }
+        // ============================================================
+        // MODEL SELECT — shared logic for all <select> model dropdowns
+        // ============================================================
+        const _modelCache = {};  // provider -> [models]
 
         // Offline fallback model lists (kept up-to-date)
         const _offlineModelLists = {
@@ -4073,255 +4024,105 @@ Write important context, facts, and information here...
             custom: [],
         };
 
-        function renderModelDropdown(models, filter) {
-            const dd = document.getElementById('modelDropdown');
-            if (!dd) return;
-            const q = (filter || '').toLowerCase();
-            const filtered = q ? models.filter(m => m.toLowerCase().includes(q)) : models;
-            if (filtered.length === 0) {
-                dd.innerHTML = '<div style="padding:10px 14px;color:var(--text-muted);font-size:13px;">No matching models. Type any model name.</div>';
-            } else {
-                dd.innerHTML = filtered.map(m => `<div class="model-option" style="padding:8px 14px;cursor:pointer;font-size:13px;font-family:\'JetBrains Mono\',monospace;border-bottom:1px solid var(--border-light);transition:background 0.1s;" onmousedown="selectModel('${m.replace(/'/g, "\\'")}')" onmouseenter="this.style.background='var(--bg-hover)'" onmouseleave="this.style.background=''">${m}</div>`).join('');
-            }
-        }
-
-        function selectModel(model) {
-            const input = document.getElementById('agentModel');
-            if (input) input.value = model;
-            hideModelDropdown();
-            syncConfig();
-        }
-
-        function showModelDropdown() {
-            const dd = document.getElementById('modelDropdown');
-            if (!dd) return;
-            const input = document.getElementById('agentModel');
-            const filter = input ? input.value : '';
-            if (_currentModels.length > 0) {
-                renderModelDropdown(_currentModels, filter);
-                dd.style.display = 'block';
-                _modelDropdownVisible = true;
-            } else {
-                // Try loading models for current provider
-                const provider = document.getElementById('agentProvider')?.value;
-                if (provider) loadModelsForProvider(provider).then(() => {
-                    if (_currentModels.length > 0) {
-                        renderModelDropdown(_currentModels, filter);
-                        dd.style.display = 'block';
-                        _modelDropdownVisible = true;
-                    }
-                });
-            }
-        }
-
-        function hideModelDropdown() {
-            const dd = document.getElementById('modelDropdown');
-            if (dd) dd.style.display = 'none';
-            _modelDropdownVisible = false;
-        }
-
-        function onModelInput() {
-            const input = document.getElementById('agentModel');
-            const filter = input ? input.value : '';
-            if (_currentModels.length > 0) {
-                renderModelDropdown(_currentModels, filter);
-                const dd = document.getElementById('modelDropdown');
-                if (dd) dd.style.display = 'block';
-            }
-            syncConfig();
-        }
-
-        // Close agent-config dropdown on outside click
-        document.addEventListener('click', (e) => {
-            const combo = document.getElementById('modelCombo');
-            if (combo && !combo.contains(e.target)) hideModelDropdown();
-            // Close chat dropdown
-            const chatInput = document.getElementById('chatModel');
-            const chatDd = document.getElementById('chatModelDropdown');
-            if (chatInput && chatDd && !chatInput.contains(e.target) && !chatDd.contains(e.target)) {
-                chatDd.style.display = 'none';
-            }
-            // Close wizard dropdown
-            const wizInput = document.getElementById('wizardModel');
-            const wizDd = document.getElementById('wizardModelDropdown');
-            if (wizInput && wizDd && !wizInput.contains(e.target) && !wizDd.contains(e.target)) {
-                wizDd.style.display = 'none';
-            }
-        });
-
-        // ============================================================
-        // CHAT PAGE — model combo-box
-        // ============================================================
-        let _chatModels = [];
-
-        async function onChatProviderChange() {
-            const provider = document.getElementById('chatProvider')?.value;
-            if (!provider) return;
-            await _loadChatModels(provider);
-        }
-
-        async function _loadChatModels(provider) {
-            const loading = document.getElementById('chatModelLoading');
-            const hint    = document.getElementById('chatModelHint');
-            if (loading) loading.style.display = '';
-
-            // Re-use agent-config cache
-            if (_modelCache[provider]) {
-                _chatModels = _modelCache[provider];
-                if (hint) hint.textContent = `${_chatModels.length} models available`;
-                if (loading) loading.style.display = 'none';
-                return;
-            }
+        /**
+         * Fetch models for a provider (from API or offline fallback).
+         * Returns an array of model name strings.
+         */
+        async function _fetchModels(provider) {
+            if (_modelCache[provider]) return _modelCache[provider];
 
             if (NanobotAPI.connected) {
                 try {
                     const result = await NanobotAPI.fetchModels(provider);
                     if (result && result.models && result.models.length > 0) {
                         _modelCache[provider] = result.models;
-                        _chatModels = result.models;
-                        const liveTag = result.live ? ' (live)' : '';
-                        if (hint) hint.textContent = `${_chatModels.length} models${liveTag}`;
-                    } else {
-                        _chatModels = _offlineModelLists[provider] || [];
-                        if (hint) hint.textContent = `${_chatModels.length} models (offline)`;
-                    }
-                } catch (_) {
-                    _chatModels = _offlineModelLists[provider] || [];
-                    if (hint) hint.textContent = 'Type any model name.';
-                }
-            } else {
-                _chatModels = _offlineModelLists[provider] || [];
-                if (hint) hint.textContent = _chatModels.length > 0 ? `${_chatModels.length} models (offline)` : 'Type any model name.';
-            }
-
-            if (loading) loading.style.display = 'none';
-        }
-
-        function _renderChatDropdown(filter) {
-            const dd = document.getElementById('chatModelDropdown');
-            if (!dd) return;
-            const q = (filter || '').toLowerCase();
-            const list = q ? _chatModels.filter(m => m.toLowerCase().includes(q)) : _chatModels;
-            if (list.length === 0) {
-                dd.innerHTML = '<div style="padding:8px 14px;color:var(--text-muted);font-size:13px;">No matches. Type any model name.</div>';
-            } else {
-                dd.innerHTML = list.map(m =>
-                    `<div style="padding:8px 14px;cursor:pointer;font-size:13px;font-family:\'JetBrains Mono\',monospace;border-bottom:1px solid var(--border-light);" onmousedown="selectChatModel('${m.replace(/'/g,"\\'")}')" onmouseenter="this.style.background='var(--bg-hover)'" onmouseleave="this.style.background=''">${m}</div>`
-                ).join('');
-            }
-        }
-
-        function selectChatModel(model) {
-            const inp = document.getElementById('chatModel');
-            if (inp) inp.value = model;
-            const dd = document.getElementById('chatModelDropdown');
-            if (dd) dd.style.display = 'none';
-        }
-
-        function showChatModelDropdown() {
-            const inp = document.getElementById('chatModel');
-            const dd  = document.getElementById('chatModelDropdown');
-            if (!dd) return;
-            const filter = inp ? inp.value : '';
-            if (_chatModels.length === 0) {
-                const provider = document.getElementById('chatProvider')?.value || 'anthropic';
-                _loadChatModels(provider).then(() => {
-                    if (_chatModels.length > 0) {
-                        _renderChatDropdown(filter);
-                        dd.style.display = 'block';
-                    }
-                });
-            } else {
-                _renderChatDropdown(filter);
-                dd.style.display = 'block';
-            }
-        }
-
-        function onChatModelInput() {
-            const inp = document.getElementById('chatModel');
-            const dd  = document.getElementById('chatModelDropdown');
-            if (!dd) return;
-            const filter = inp ? inp.value : '';
-            if (_chatModels.length > 0) {
-                _renderChatDropdown(filter);
-                dd.style.display = 'block';
-            }
-        }
-
-        // ============================================================
-        // SETUP WIZARD — model combo-box
-        // ============================================================
-        let _wizardModels = [];
-
-        // Called from wizardSelectProvider so the wizard model list follows the selected pill
-        async function _loadWizardModels(provider) {
-            if (_modelCache[provider]) {
-                _wizardModels = _modelCache[provider];
-                return;
-            }
-            if (NanobotAPI.connected) {
-                try {
-                    const result = await NanobotAPI.fetchModels(provider);
-                    if (result && result.models && result.models.length > 0) {
-                        _modelCache[provider] = result.models;
-                        _wizardModels = result.models;
-                        return;
+                        return result.models;
                     }
                 } catch (_) {}
             }
-            _wizardModels = _offlineModelLists[provider] || [];
+            // Fallback to offline lists
+            const fallback = _offlineModelLists[provider] || [];
+            _modelCache[provider] = fallback;
+            return fallback;
         }
 
-        function _renderWizardDropdown(filter) {
-            const dd = document.getElementById('wizardModelDropdown');
-            if (!dd) return;
-            const q = (filter || '').toLowerCase();
-            const list = q ? _wizardModels.filter(m => m.toLowerCase().includes(q)) : _wizardModels;
-            if (list.length === 0) {
-                dd.innerHTML = '<div style="padding:8px 14px;color:var(--text-muted);font-size:13px;">Type any model name.</div>';
-            } else {
-                dd.innerHTML = list.map(m =>
-                    `<div style="padding:8px 14px;cursor:pointer;font-size:13px;font-family:\'JetBrains Mono\',monospace;border-bottom:1px solid var(--border-light);background:var(--bg-surface);" onmousedown="selectWizardModel('${m.replace(/'/g,"\\'")}')" onmouseenter="this.style.background='var(--bg-hover)'" onmouseleave="this.style.background='var(--bg-surface)'">${m}</div>`
-                ).join('');
+        /**
+         * Populate a <select> element with model options.
+         * @param {string} selectId   - id of the <select> element
+         * @param {string[]} models   - list of model names
+         * @param {string} [current]  - currently selected value to preserve
+         * @param {boolean} [allowBlank] - if true, prepend a blank "Use default" option
+         */
+        function _populateModelSelect(selectId, models, current, allowBlank) {
+            const sel = document.getElementById(selectId);
+            if (!sel) return;
+            const prev = current || sel.value;
+            sel.innerHTML = '';
+            if (allowBlank) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = 'Use default model';
+                sel.appendChild(opt);
+            }
+            models.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m;
+                opt.textContent = m;
+                sel.appendChild(opt);
+            });
+            // If the current value exists in the list, re-select it.
+            // Otherwise, if it's a custom value, add it at the top.
+            if (prev) {
+                if (models.includes(prev)) {
+                    sel.value = prev;
+                } else {
+                    const opt = document.createElement('option');
+                    opt.value = prev;
+                    opt.textContent = prev;
+                    sel.insertBefore(opt, sel.firstChild);
+                    sel.value = prev;
+                }
             }
         }
 
-        function selectWizardModel(model) {
-            const inp = document.getElementById('wizardModel');
-            if (inp) inp.value = model;
-            const dd = document.getElementById('wizardModelDropdown');
-            if (dd) dd.style.display = 'none';
-        }
-
-        function showWizardModelDropdown() {
-            const inp = document.getElementById('wizardModel');
-            const dd  = document.getElementById('wizardModelDropdown');
-            if (!dd) return;
-            const filter = inp ? inp.value : '';
-            if (_wizardModels.length === 0) {
-                const pill = document.querySelector('.provider-pill.selected');
-                const provider = pill ? pill.dataset.provider : 'openrouter';
-                _loadWizardModels(provider).then(() => {
-                    if (_wizardModels.length > 0) {
-                        _renderWizardDropdown(filter);
-                        dd.style.display = 'block';
-                    }
-                });
-            } else {
-                _renderWizardDropdown(filter);
-                dd.style.display = 'block';
+        // ============================================================
+        // AGENT CONFIG — provider change -> populate model <select>
+        // ============================================================
+        async function onProviderChange() {
+            syncConfig();
+            const provider = document.getElementById('agentProvider')?.value;
+            if (provider) {
+                const models = await _fetchModels(provider);
+                _populateModelSelect('agentModel', models, state.agentConfig.model);
             }
         }
 
-        function onWizardModelInput() {
-            const inp = document.getElementById('wizardModel');
-            const dd  = document.getElementById('wizardModelDropdown');
-            if (!dd) return;
-            const filter = inp ? inp.value : '';
-            if (_wizardModels.length > 0) {
-                _renderWizardDropdown(filter);
-                dd.style.display = 'block';
-            }
+        async function loadModelsForProvider(provider) {
+            const models = await _fetchModels(provider);
+            _populateModelSelect('agentModel', models, state.agentConfig.model);
+        }
+
+        // ============================================================
+        // CHAT PAGE — provider change -> populate model <select>
+        // ============================================================
+        async function onChatProviderChange() {
+            const provider = document.getElementById('chatProvider')?.value;
+            if (!provider) return;
+            const models = await _fetchModels(provider);
+            _populateModelSelect('chatModel', models, null);
+        }
+
+        async function _loadChatModels(provider) {
+            const models = await _fetchModels(provider);
+            _populateModelSelect('chatModel', models, null);
+        }
+
+        // ============================================================
+        // SETUP WIZARD — pill change -> populate model <select>
+        // ============================================================
+        async function _loadWizardModels(provider) {
+            const models = await _fetchModels(provider);
+            _populateModelSelect('wizardModel', models, null, true);
         }
 
         // --- Populate Agent Config Form from state ---
@@ -4332,7 +4133,6 @@ Write important context, facts, and information here...
             set('agentVersion', c.version);
             set('agentWorkspace', c.workspace);
             set('agentProvider', c.provider);
-            set('agentModel', c.model);
             set('agentTemperature', c.temperature);
             set('agentMaxTokens', c.max_tokens);
             set('agentMaxIterations', c.max_iterations);
@@ -4343,9 +4143,17 @@ Write important context, facts, and information here...
             // Memory
             const memEl = document.getElementById('memoryContent');
             if (memEl && state.memory) memEl.value = state.memory;
-            // Load models for the selected provider
+            // Load models for the selected provider, then set the current model
             const provider = c.provider || document.getElementById('agentProvider')?.value;
-            if (provider) loadModelsForProvider(provider);
+            if (provider) {
+                _fetchModels(provider).then(models => {
+                    _populateModelSelect('agentModel', models, c.model);
+                    // Also populate chat page model select
+                    const chatProviderEl = document.getElementById('chatProvider');
+                    if (chatProviderEl) chatProviderEl.value = provider;
+                    _populateModelSelect('chatModel', models, c.model);
+                });
+            }
         }
 
         // --- On field change: persist immediately + save to backend ---
