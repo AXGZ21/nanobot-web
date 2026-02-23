@@ -2540,7 +2540,7 @@ Write important context, facts, and information here...
                         <div class="chat-header">
                             <div class="form-group">
                                 <label class="form-label">Provider</label>
-                                <select class="form-select" id="chatProvider">
+                                <select class="form-select" id="chatProvider" onchange="onChatProviderChange()">
                                     <option value="openrouter">OpenRouter</option>
                                     <option value="anthropic">Anthropic</option>
                                     <option value="openai">OpenAI</option>
@@ -2555,14 +2555,19 @@ Write important context, facts, and information here...
                                     <option value="moonshot">Moonshot</option>
                                     <option value="minimax">MiniMax</option>
                                     <option value="vllm">vLLM</option>
-                                    <option value="openai_codex">OpenAI Codex (OAuth)</option>
-                                    <option value="github_copilot">GitHub Copilot (OAuth)</option>
+                                    <option value="openai_codex">OpenAI Codex</option>
+                                    <option value="github_copilot">GitHub Copilot</option>
                                     <option value="custom">Custom</option>
                                 </select>
                             </div>
-                            <div class="form-group">
+                            <div class="form-group" style="position:relative;flex:1;min-width:0;">
                                 <label class="form-label">Model</label>
-                                <input type="text" class="form-input mono" id="chatModel" value="claude-opus-4-6">
+                                <div style="position:relative;">
+                                    <input type="text" class="form-input mono" id="chatModel" placeholder="Type or select a model..." autocomplete="off" oninput="onChatModelInput()" onfocus="showChatModelDropdown()">
+                                    <div id="chatModelDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:220px;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;box-shadow:var(--shadow-md);z-index:200;"></div>
+                                    <div id="chatModelLoading" style="display:none;position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--text-muted);">Loading...</div>
+                                </div>
+                                <div id="chatModelHint" style="font-size:11px;color:var(--text-muted);margin-top:3px;"></div>
                             </div>
                             <div class="chat-status">
                                 <span>●</span> Connected
@@ -2705,7 +2710,10 @@ Write important context, facts, and information here...
 
             <div class="setup-field" id="wizardModelField">
                 <label>MODEL (optional)</label>
-                <input type="text" id="wizardModel" placeholder="anthropic/claude-sonnet-4-20250514" value="">
+                <div style="position:relative;">
+                    <input type="text" id="wizardModel" placeholder="Leave blank for default..." autocomplete="off" oninput="onWizardModelInput()" onfocus="showWizardModelDropdown()" style="width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:8px;font-family:'JetBrains Mono',monospace;font-size:13px;box-sizing:border-box;">
+                    <div id="wizardModelDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:200px;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;box-shadow:var(--shadow-md);z-index:300;"></div>
+                </div>
                 <div class="field-hint">Leave blank for default. Change later in Agent Config.</div>
             </div>
 
@@ -3033,6 +3041,19 @@ Write important context, facts, and information here...
                 state.agentConfig.workspace = d.workspace || state.agentConfig.workspace;
                 state.agentConfig.temperature = d.temperature ?? state.agentConfig.temperature;
                 state.agentConfig.max_tokens = d.maxTokens ?? state.agentConfig.max_tokens;
+                // Sync chat page model/provider from backend config
+                if (d.model) {
+                    const chatModelEl = document.getElementById('chatModel');
+                    if (chatModelEl) chatModelEl.value = d.model;
+                }
+                if (d.provider || state.agentConfig.provider) {
+                    const chatProviderEl = document.getElementById('chatProvider');
+                    const prov = d.provider || state.agentConfig.provider;
+                    if (chatProviderEl && prov) {
+                        chatProviderEl.value = prov;
+                        _loadChatModels(prov);
+                    }
+                }
                 state.agentConfig.max_iterations = d.maxToolIterations ?? state.agentConfig.max_iterations;
                 state.agentConfig.memory_window = d.memoryWindow ?? state.agentConfig.memory_window;
             }
@@ -3331,6 +3352,11 @@ Write important context, facts, and information here...
             document.querySelectorAll('.provider-pill').forEach(p => p.classList.remove('selected'));
             pill.classList.add('selected');
             const provider = pill.dataset.provider;
+            // Pre-load models so the wizard model dropdown is ready
+            _wizardModels = [];
+            if (provider && provider !== 'openai_codex' && provider !== 'github_copilot') {
+                _loadWizardModels(provider);
+            }
             const info = wizardProviderHints[provider] || {};
 
             const keyField = document.getElementById('wizardKeyField');
@@ -3598,6 +3624,11 @@ Write important context, facts, and information here...
             }
             document.getElementById('pageTitle').textContent = pageTitles[pageId] || pageId;
             emitEvent('navigate', { pageId });
+            // Auto-load chat models when navigating to chat page
+            if (pageId === 'chat') {
+                const provider = document.getElementById('chatProvider')?.value || 'anthropic';
+                _loadChatModels(provider);
+            }
         }
 
         // --- Collect field values from a card's inputs ---
@@ -3998,21 +4029,44 @@ Write important context, facts, and information here...
             }
         }
 
-        // Offline fallback model lists (subset)
+        // Offline fallback model lists (kept up-to-date)
         const _offlineModelLists = {
-            anthropic: ['claude-opus-4-5-20250514','claude-sonnet-4-5-20250514','claude-sonnet-4-20250514','claude-3-5-sonnet-20241022','claude-3-5-haiku-20241022','claude-3-opus-20240229'],
-            openai: ['gpt-4o','gpt-4o-mini','gpt-4-turbo','gpt-4','o1','o1-mini','o3','o3-mini','o4-mini','gpt-4.1','gpt-4.1-mini','gpt-4.1-nano'],
+            anthropic: [
+                'claude-opus-4-6','claude-opus-4-5-20250514','claude-opus-4-5',
+                'claude-sonnet-4-5-20250514','claude-sonnet-4-5',
+                'claude-sonnet-4-20250514','claude-sonnet-4',
+                'claude-3-5-sonnet-20241022','claude-3-5-haiku-20241022','claude-3-opus-20240229',
+            ],
+            openai: [
+                'gpt-4o','gpt-4o-mini','gpt-4-turbo','gpt-4',
+                'gpt-4o-2024-08-06','o1','o1-mini','o1-preview',
+                'o3','o3-mini','o4-mini','gpt-4.1','gpt-4.1-mini','gpt-4.1-nano',
+            ],
             deepseek: ['deepseek-chat','deepseek-coder','deepseek-reasoner'],
-            gemini: ['gemini/gemini-2.5-pro-preview-05-06','gemini/gemini-2.5-flash-preview-04-17','gemini/gemini-2.0-flash','gemini/gemini-1.5-pro','gemini/gemini-1.5-flash'],
-            groq: ['groq/llama-3.3-70b-versatile','groq/llama-3.1-8b-instant','groq/mixtral-8x7b-32768','groq/whisper-large-v3'],
-            openrouter: ['anthropic/claude-opus-4-5','anthropic/claude-sonnet-4-5','openai/gpt-4o','openai/o3','google/gemini-2.5-pro-preview','deepseek/deepseek-chat','meta-llama/llama-3.3-70b-instruct'],
-            aihubmix: ['claude-opus-4-5-20250514','gpt-4o','deepseek-chat'],
-            siliconflow: ['deepseek-ai/DeepSeek-V3','deepseek-ai/DeepSeek-R1','Qwen/Qwen2.5-72B-Instruct'],
-            volcengine: ['doubao-1.5-pro-32k','doubao-1.5-lite-32k','deepseek-v3','deepseek-r1'],
-            dashscope: ['qwen-max','qwen-plus','qwen-turbo','qwen2.5-72b-instruct','qwen2.5-coder-32b-instruct'],
+            gemini: [
+                'gemini/gemini-2.5-pro-preview-05-06','gemini/gemini-2.5-flash-preview-04-17',
+                'gemini/gemini-2.0-flash','gemini/gemini-2.0-flash-lite',
+                'gemini/gemini-1.5-pro','gemini/gemini-1.5-flash',
+            ],
+            groq: [
+                'groq/llama-3.3-70b-versatile','groq/llama-3.1-8b-instant',
+                'groq/llama-3.1-70b-versatile','groq/mixtral-8x7b-32768',
+                'groq/gemma2-9b-it','groq/deepseek-r1-distill-llama-70b','groq/whisper-large-v3',
+            ],
+            openrouter: [
+                'anthropic/claude-opus-4-5','anthropic/claude-sonnet-4-5','anthropic/claude-sonnet-4',
+                'openai/gpt-4o','openai/gpt-4o-mini','openai/o3','openai/o3-mini','openai/o4-mini',
+                'google/gemini-2.5-pro-preview','google/gemini-2.5-flash-preview','google/gemini-2.0-flash-001',
+                'deepseek/deepseek-chat','deepseek/deepseek-reasoner',
+                'meta-llama/llama-3.3-70b-instruct','qwen/qwen-2.5-72b-instruct','mistralai/mistral-large-2411',
+            ],
+            aihubmix: ['claude-opus-4-5-20250514','claude-sonnet-4-5-20250514','gpt-4o','gpt-4o-mini','deepseek-chat','gemini-2.0-flash'],
+            siliconflow: ['deepseek-ai/DeepSeek-V3','deepseek-ai/DeepSeek-R1','Qwen/Qwen2.5-72B-Instruct','Qwen/Qwen2.5-7B-Instruct','meta-llama/Meta-Llama-3.1-70B-Instruct'],
+            volcengine: ['doubao-1.5-pro-32k','doubao-1.5-lite-32k','doubao-pro-256k','deepseek-v3','deepseek-r1'],
+            dashscope: ['qwen-max','qwen-plus','qwen-turbo','qwen-long','qwen2.5-72b-instruct','qwen2.5-14b-instruct','qwen2.5-coder-32b-instruct'],
             zhipu: ['glm-4-plus','glm-4-long','glm-4-flash','glm-4-air','glm-4'],
             moonshot: ['kimi-k2.5','moonshot-v1-128k','moonshot-v1-32k','moonshot-v1-8k'],
-            minimax: ['MiniMax-Text-01','MiniMax-M1','abab6.5s-chat'],
+            minimax: ['MiniMax-Text-01','MiniMax-M1','abab6.5s-chat','abab6.5-chat'],
             vllm: [],
             openai_codex: ['openai-codex/codex-mini-latest','openai-codex/o4-mini','openai-codex/o3','openai-codex/gpt-4o'],
             github_copilot: ['github_copilot/gpt-4o','github_copilot/gpt-4o-mini','github_copilot/claude-3.5-sonnet','github_copilot/o3-mini'],
@@ -4077,13 +4131,198 @@ Write important context, facts, and information here...
             syncConfig();
         }
 
-        // Close dropdown on outside click
+        // Close agent-config dropdown on outside click
         document.addEventListener('click', (e) => {
             const combo = document.getElementById('modelCombo');
-            if (combo && !combo.contains(e.target)) {
-                hideModelDropdown();
+            if (combo && !combo.contains(e.target)) hideModelDropdown();
+            // Close chat dropdown
+            const chatInput = document.getElementById('chatModel');
+            const chatDd = document.getElementById('chatModelDropdown');
+            if (chatInput && chatDd && !chatInput.contains(e.target) && !chatDd.contains(e.target)) {
+                chatDd.style.display = 'none';
+            }
+            // Close wizard dropdown
+            const wizInput = document.getElementById('wizardModel');
+            const wizDd = document.getElementById('wizardModelDropdown');
+            if (wizInput && wizDd && !wizInput.contains(e.target) && !wizDd.contains(e.target)) {
+                wizDd.style.display = 'none';
             }
         });
+
+        // ============================================================
+        // CHAT PAGE — model combo-box
+        // ============================================================
+        let _chatModels = [];
+
+        async function onChatProviderChange() {
+            const provider = document.getElementById('chatProvider')?.value;
+            if (!provider) return;
+            await _loadChatModels(provider);
+        }
+
+        async function _loadChatModels(provider) {
+            const loading = document.getElementById('chatModelLoading');
+            const hint    = document.getElementById('chatModelHint');
+            if (loading) loading.style.display = '';
+
+            // Re-use agent-config cache
+            if (_modelCache[provider]) {
+                _chatModels = _modelCache[provider];
+                if (hint) hint.textContent = `${_chatModels.length} models available`;
+                if (loading) loading.style.display = 'none';
+                return;
+            }
+
+            if (NanobotAPI.connected) {
+                try {
+                    const result = await NanobotAPI.fetchModels(provider);
+                    if (result && result.models && result.models.length > 0) {
+                        _modelCache[provider] = result.models;
+                        _chatModels = result.models;
+                        const liveTag = result.live ? ' (live)' : '';
+                        if (hint) hint.textContent = `${_chatModels.length} models${liveTag}`;
+                    } else {
+                        _chatModels = _offlineModelLists[provider] || [];
+                        if (hint) hint.textContent = `${_chatModels.length} models (offline)`;
+                    }
+                } catch (_) {
+                    _chatModels = _offlineModelLists[provider] || [];
+                    if (hint) hint.textContent = 'Type any model name.';
+                }
+            } else {
+                _chatModels = _offlineModelLists[provider] || [];
+                if (hint) hint.textContent = _chatModels.length > 0 ? `${_chatModels.length} models (offline)` : 'Type any model name.';
+            }
+
+            if (loading) loading.style.display = 'none';
+        }
+
+        function _renderChatDropdown(filter) {
+            const dd = document.getElementById('chatModelDropdown');
+            if (!dd) return;
+            const q = (filter || '').toLowerCase();
+            const list = q ? _chatModels.filter(m => m.toLowerCase().includes(q)) : _chatModels;
+            if (list.length === 0) {
+                dd.innerHTML = '<div style="padding:8px 14px;color:var(--text-muted);font-size:13px;">No matches. Type any model name.</div>';
+            } else {
+                dd.innerHTML = list.map(m =>
+                    `<div style="padding:8px 14px;cursor:pointer;font-size:13px;font-family:\'JetBrains Mono\',monospace;border-bottom:1px solid var(--border-light);" onmousedown="selectChatModel('${m.replace(/'/g,"\\'")}')" onmouseenter="this.style.background='var(--bg-hover)'" onmouseleave="this.style.background=''">${m}</div>`
+                ).join('');
+            }
+        }
+
+        function selectChatModel(model) {
+            const inp = document.getElementById('chatModel');
+            if (inp) inp.value = model;
+            const dd = document.getElementById('chatModelDropdown');
+            if (dd) dd.style.display = 'none';
+        }
+
+        function showChatModelDropdown() {
+            const inp = document.getElementById('chatModel');
+            const dd  = document.getElementById('chatModelDropdown');
+            if (!dd) return;
+            const filter = inp ? inp.value : '';
+            if (_chatModels.length === 0) {
+                const provider = document.getElementById('chatProvider')?.value || 'anthropic';
+                _loadChatModels(provider).then(() => {
+                    if (_chatModels.length > 0) {
+                        _renderChatDropdown(filter);
+                        dd.style.display = 'block';
+                    }
+                });
+            } else {
+                _renderChatDropdown(filter);
+                dd.style.display = 'block';
+            }
+        }
+
+        function onChatModelInput() {
+            const inp = document.getElementById('chatModel');
+            const dd  = document.getElementById('chatModelDropdown');
+            if (!dd) return;
+            const filter = inp ? inp.value : '';
+            if (_chatModels.length > 0) {
+                _renderChatDropdown(filter);
+                dd.style.display = 'block';
+            }
+        }
+
+        // ============================================================
+        // SETUP WIZARD — model combo-box
+        // ============================================================
+        let _wizardModels = [];
+
+        // Called from wizardSelectProvider so the wizard model list follows the selected pill
+        async function _loadWizardModels(provider) {
+            if (_modelCache[provider]) {
+                _wizardModels = _modelCache[provider];
+                return;
+            }
+            if (NanobotAPI.connected) {
+                try {
+                    const result = await NanobotAPI.fetchModels(provider);
+                    if (result && result.models && result.models.length > 0) {
+                        _modelCache[provider] = result.models;
+                        _wizardModels = result.models;
+                        return;
+                    }
+                } catch (_) {}
+            }
+            _wizardModels = _offlineModelLists[provider] || [];
+        }
+
+        function _renderWizardDropdown(filter) {
+            const dd = document.getElementById('wizardModelDropdown');
+            if (!dd) return;
+            const q = (filter || '').toLowerCase();
+            const list = q ? _wizardModels.filter(m => m.toLowerCase().includes(q)) : _wizardModels;
+            if (list.length === 0) {
+                dd.innerHTML = '<div style="padding:8px 14px;color:var(--text-muted);font-size:13px;">Type any model name.</div>';
+            } else {
+                dd.innerHTML = list.map(m =>
+                    `<div style="padding:8px 14px;cursor:pointer;font-size:13px;font-family:\'JetBrains Mono\',monospace;border-bottom:1px solid var(--border-light);background:var(--bg-surface);" onmousedown="selectWizardModel('${m.replace(/'/g,"\\'")}')" onmouseenter="this.style.background='var(--bg-hover)'" onmouseleave="this.style.background='var(--bg-surface)'">${m}</div>`
+                ).join('');
+            }
+        }
+
+        function selectWizardModel(model) {
+            const inp = document.getElementById('wizardModel');
+            if (inp) inp.value = model;
+            const dd = document.getElementById('wizardModelDropdown');
+            if (dd) dd.style.display = 'none';
+        }
+
+        function showWizardModelDropdown() {
+            const inp = document.getElementById('wizardModel');
+            const dd  = document.getElementById('wizardModelDropdown');
+            if (!dd) return;
+            const filter = inp ? inp.value : '';
+            if (_wizardModels.length === 0) {
+                const pill = document.querySelector('.provider-pill.selected');
+                const provider = pill ? pill.dataset.provider : 'openrouter';
+                _loadWizardModels(provider).then(() => {
+                    if (_wizardModels.length > 0) {
+                        _renderWizardDropdown(filter);
+                        dd.style.display = 'block';
+                    }
+                });
+            } else {
+                _renderWizardDropdown(filter);
+                dd.style.display = 'block';
+            }
+        }
+
+        function onWizardModelInput() {
+            const inp = document.getElementById('wizardModel');
+            const dd  = document.getElementById('wizardModelDropdown');
+            if (!dd) return;
+            const filter = inp ? inp.value : '';
+            if (_wizardModels.length > 0) {
+                _renderWizardDropdown(filter);
+                dd.style.display = 'block';
+            }
+        }
 
         // --- Populate Agent Config Form from state ---
         function populateAgentConfigForm() {
