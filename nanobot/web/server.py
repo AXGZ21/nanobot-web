@@ -143,7 +143,26 @@ async def auth_middleware(request: web.Request, handler):
 
 async def login_page(request: web.Request):
     """Serve the login page."""
-    return web.FileResponse(STATIC_DIR / "login.html")
+    login_file = STATIC_DIR / "login.html"
+    if login_file.exists():
+        return web.FileResponse(login_file)
+    # Minimal inline login page if login.html doesn't exist
+    return web.Response(
+        text="""<!DOCTYPE html>
+<html><head><title>Nanobot Login</title>
+<style>body{font-family:sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:#faf9ff}
+.login-box{background:#fff;padding:40px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,0.08);max-width:360px;width:100%}
+h1{margin:0 0 24px;font-size:22px;color:#1e1b4b}input{width:100%;padding:10px 14px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;margin-bottom:16px;box-sizing:border-box}
+button{width:100%;padding:10px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-size:14px;cursor:pointer}
+button:hover{background:#6d28d9}.error{color:#dc2626;font-size:13px;margin-bottom:12px;display:none}</style>
+</head><body><div class="login-box"><h1>Nanobot Login</h1>
+<div class="error" id="error"></div>
+<input type="password" id="pw" placeholder="Password" onkeydown="if(event.key==='Enter')login()">
+<button onclick="login()">Sign In</button></div>
+<script>async function login(){const pw=document.getElementById('pw').value;const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});if(r.ok){window.location.href='/'}else{const e=document.getElementById('error');e.textContent='Invalid password';e.style.display='block'}}</script>
+</body></html>""",
+        content_type="text/html",
+    )
 
 
 async def login_handler(request: web.Request):
@@ -209,7 +228,11 @@ async def check_auth_status(request: web.Request):
 
 async def index_handler(request: web.Request):
     """Serve the main dashboard."""
-    return web.FileResponse(STATIC_DIR / "index.html")
+    # Try index.html first, fall back to dashboard.html
+    index_file = STATIC_DIR / "index.html"
+    if not index_file.exists():
+        index_file = STATIC_DIR / "dashboard.html"
+    return web.FileResponse(index_file)
 
 
 async def health_handler(request: web.Request):
@@ -261,6 +284,11 @@ async def start_server(host: str = "0.0.0.0", port: int = 8080):
         await asyncio.Event().wait()
     finally:
         await runner.cleanup()
+
+
+def run_server(host: str = "0.0.0.0", port: int = 8080):
+    """Synchronous entry point — starts the web server (called from CLI)."""
+    asyncio.run(start_server(host=host, port=port))
 
 
 if __name__ == "__main__":

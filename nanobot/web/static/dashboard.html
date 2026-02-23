@@ -1961,18 +1961,8 @@
                                     <h3 class="card-title">Agent Defaults</h3>
                                 </div>
                                 <div class="form-group">
-                                    <label class="form-label">Model</label>
-                                    <select class="form-select" id="agentModel" onchange="syncConfig()">
-                                        <option value="claude-opus-4-6" selected>claude-opus-4-6</option>
-                                        <option value="claude-sonnet-4-5">claude-sonnet-4-5</option>
-                                        <option value="gpt-4">gpt-4</option>
-                                        <option value="gpt-4-turbo">gpt-4-turbo</option>
-                                        <option value="deepseek-chat">deepseek-chat</option>
-                                    </select>
-                                </div>
-                                <div class="form-group">
                                     <label class="form-label">Provider</label>
-                                    <select class="form-select" id="agentProvider" onchange="syncConfig()">
+                                    <select class="form-select" id="agentProvider" onchange="onProviderChange()">
                                         <option value="openrouter">OpenRouter</option>
                                         <option value="anthropic" selected>Anthropic</option>
                                         <option value="openai">OpenAI</option>
@@ -1991,6 +1981,15 @@
                                         <option value="github_copilot">GitHub Copilot (OAuth)</option>
                                         <option value="custom">Custom</option>
                                     </select>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Model</label>
+                                    <div class="model-combo" id="modelCombo" style="position:relative;">
+                                        <input type="text" class="form-input mono" id="agentModel" placeholder="Type or select a model..." autocomplete="off" oninput="onModelInput()" onfocus="showModelDropdown()" onchange="syncConfig()">
+                                        <div id="modelDropdown" class="model-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:240px;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;box-shadow:var(--shadow-md);z-index:100;"></div>
+                                        <div id="modelLoading" style="display:none;position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:12px;color:var(--text-muted);">Loading...</div>
+                                    </div>
+                                    <div class="field-hint" style="font-size:11px;color:var(--text-muted);margin-top:4px;" id="modelHint">Select a provider to see available models, or type any model name.</div>
                                 </div>
                             </div>
 
@@ -2915,6 +2914,10 @@ Write important context, facts, and information here...
                 return await this.fetch('/api/dashboard/extensions');
             },
 
+            async fetchModels(providerName) {
+                return await this.fetch(`/api/providers/${providerName}/models`);
+            },
+
             async oauthStatus(provider) {
                 return await this.fetch(`/api/oauth/${provider}/status`);
             },
@@ -3078,23 +3081,23 @@ Write important context, facts, and information here...
 
         // --- Mutable Data Registries ---
         const providers = [
-            { id: 'anthropic', name: 'Anthropic', color: 'primary', tags: ['LLM'], fields: ['api_key'], promptCaching: true, note: '' },
-            { id: 'openai', name: 'OpenAI', color: 'success', tags: ['LLM'], fields: ['api_key', 'base_url'], note: '' },
-            { id: 'deepseek', name: 'DeepSeek', color: 'info', tags: ['LLM'], fields: ['api_key'], note: '' },
-            { id: 'gemini', name: 'Gemini', color: 'warning', tags: ['LLM'], fields: ['api_key'], note: '' },
-            { id: 'groq', name: 'Groq', color: 'danger', tags: ['LLM'], fields: ['api_key'], note: 'Also supports Whisper transcription' },
-            { id: 'openrouter', name: 'OpenRouter', color: 'primary', tags: ['ROUTER'], fields: ['api_key'], promptCaching: true, note: 'Recommended globally' },
-            { id: 'aihubmix', name: 'AiHubMix', color: 'success', tags: ['LLM'], fields: ['api_key'], note: '' },
-            { id: 'siliconflow', name: 'SiliconFlow', color: 'info', tags: ['LLM'], fields: ['api_key'], note: '' },
-            { id: 'volcengine', name: 'VolcEngine', color: 'warning', tags: ['LLM'], fields: ['api_key', 'base_url'], isNew: true, note: '' },
+            { id: 'anthropic', name: 'Anthropic', color: 'primary', tags: ['LLM'], fields: ['api_key', 'base_url'], promptCaching: true, note: 'Claude models. Base URL optional (for proxy).' },
+            { id: 'openai', name: 'OpenAI', color: 'success', tags: ['LLM'], fields: ['api_key', 'base_url'], note: 'GPT and o-series models. Base URL optional.' },
+            { id: 'deepseek', name: 'DeepSeek', color: 'info', tags: ['LLM'], fields: ['api_key', 'base_url'], note: 'DeepSeek Chat, Coder, Reasoner' },
+            { id: 'gemini', name: 'Gemini', color: 'warning', tags: ['LLM'], fields: ['api_key'], note: 'Google Gemini models' },
+            { id: 'groq', name: 'Groq', color: 'danger', tags: ['LLM'], fields: ['api_key'], note: 'Fast inference. Also supports Whisper transcription.' },
+            { id: 'openrouter', name: 'OpenRouter', color: 'primary', tags: ['ROUTER'], fields: ['api_key'], promptCaching: true, note: 'Routes to 200+ models from all providers' },
+            { id: 'aihubmix', name: 'AiHubMix', color: 'success', tags: ['ROUTER'], fields: ['api_key', 'base_url'], note: 'Global gateway, OpenAI-compatible' },
+            { id: 'siliconflow', name: 'SiliconFlow', color: 'info', tags: ['ROUTER'], fields: ['api_key', 'base_url'], note: 'SiliconFlow gateway' },
+            { id: 'volcengine', name: 'VolcEngine', color: 'warning', tags: ['ROUTER'], fields: ['api_key', 'base_url'], note: 'Volcengine / Doubao models' },
             { id: 'dashscope', name: 'DashScope/Qwen', color: 'danger', tags: ['LLM'], fields: ['api_key'], note: 'Alibaba Qwen models' },
-            { id: 'zhipu', name: 'Zhipu', color: 'primary', tags: ['LLM'], fields: ['api_key'], note: 'GLM models' },
-            { id: 'moonshot', name: 'Moonshot', color: 'success', tags: ['LLM'], fields: ['api_key'], note: 'Kimi' },
-            { id: 'minimax', name: 'MiniMax', color: 'info', tags: ['LLM'], fields: ['api_key', 'group_id'], note: '' },
-            { id: 'vllm', name: 'vLLM', color: 'warning', tags: ['LOCAL'], fields: ['base_url', 'model'], note: '' },
-            { id: 'openai_codex', name: 'OpenAI Codex', color: 'success', tags: ['LLM', 'OAUTH'], fields: [], isOAuth: true, note: 'OAuth — run: nanobot provider login openai-codex' },
-            { id: 'github_copilot', name: 'GitHub Copilot', color: 'primary', tags: ['LLM', 'OAUTH'], fields: [], isOAuth: true, note: 'OAuth — run: nanobot provider login github-copilot' },
-            { id: 'custom', name: 'Custom', color: 'danger', tags: ['CUSTOM'], fields: ['base_url', 'api_key', 'model'], note: '' }
+            { id: 'zhipu', name: 'Zhipu', color: 'primary', tags: ['LLM'], fields: ['api_key'], note: 'GLM models (Zhipu AI)' },
+            { id: 'moonshot', name: 'Moonshot', color: 'success', tags: ['LLM'], fields: ['api_key', 'base_url'], note: 'Kimi models. Default: api.moonshot.ai' },
+            { id: 'minimax', name: 'MiniMax', color: 'info', tags: ['LLM'], fields: ['api_key'], note: 'MiniMax models' },
+            { id: 'vllm', name: 'vLLM', color: 'warning', tags: ['LOCAL'], fields: ['base_url', 'api_key'], note: 'Local vLLM or any OpenAI-compatible server' },
+            { id: 'openai_codex', name: 'OpenAI Codex', color: 'success', tags: ['LLM', 'OAUTH'], fields: [], isOAuth: true, note: 'OAuth login required. Run: nanobot provider login openai-codex' },
+            { id: 'github_copilot', name: 'GitHub Copilot', color: 'primary', tags: ['LLM', 'OAUTH'], fields: [], isOAuth: true, note: 'OAuth login required. Run: nanobot provider login github-copilot' },
+            { id: 'custom', name: 'Custom', color: 'danger', tags: ['CUSTOM'], fields: ['base_url', 'api_key'], note: 'Any OpenAI-compatible endpoint' }
         ];
 
         const channels = [
@@ -3938,6 +3941,150 @@ Write important context, facts, and information here...
             `).join('');
         }
 
+        // --- Model combo-box state & functions ---
+        let _modelCache = {};       // provider -> [models]
+        let _currentModels = [];    // currently shown in dropdown
+        let _modelDropdownVisible = false;
+
+        async function onProviderChange() {
+            syncConfig();
+            const provider = document.getElementById('agentProvider')?.value;
+            if (provider) {
+                await loadModelsForProvider(provider);
+            }
+        }
+
+        async function loadModelsForProvider(provider) {
+            const loading = document.getElementById('modelLoading');
+            const hint = document.getElementById('modelHint');
+
+            // Show from cache instantly if available
+            if (_modelCache[provider]) {
+                _currentModels = _modelCache[provider];
+                renderModelDropdown(_currentModels);
+                if (hint) hint.textContent = `${_currentModels.length} models available for ${provider}`;
+                return;
+            }
+
+            // Try fetching from backend
+            if (NanobotAPI.connected) {
+                if (loading) loading.style.display = '';
+                if (hint) hint.textContent = 'Fetching models...';
+                try {
+                    const result = await NanobotAPI.fetchModels(provider);
+                    if (result && result.models) {
+                        _modelCache[provider] = result.models;
+                        _currentModels = result.models;
+                        renderModelDropdown(_currentModels);
+                        const liveTag = result.live ? ' (live)' : '';
+                        if (hint) hint.textContent = `${_currentModels.length} models available${liveTag}`;
+                    } else {
+                        _currentModels = [];
+                        renderModelDropdown([]);
+                        if (hint) hint.textContent = 'No models found. Type a model name manually.';
+                    }
+                } catch (e) {
+                    _currentModels = [];
+                    if (hint) hint.textContent = 'Could not fetch models. Type a model name manually.';
+                }
+                if (loading) loading.style.display = 'none';
+            } else {
+                // Offline — use built-in fallback lists
+                const fallback = _offlineModelLists[provider] || [];
+                _modelCache[provider] = fallback;
+                _currentModels = fallback;
+                renderModelDropdown(fallback);
+                if (hint) hint.textContent = fallback.length > 0 ? `${fallback.length} models (offline)` : 'Type a model name manually.';
+            }
+        }
+
+        // Offline fallback model lists (subset)
+        const _offlineModelLists = {
+            anthropic: ['claude-opus-4-5-20250514','claude-sonnet-4-5-20250514','claude-sonnet-4-20250514','claude-3-5-sonnet-20241022','claude-3-5-haiku-20241022','claude-3-opus-20240229'],
+            openai: ['gpt-4o','gpt-4o-mini','gpt-4-turbo','gpt-4','o1','o1-mini','o3','o3-mini','o4-mini','gpt-4.1','gpt-4.1-mini','gpt-4.1-nano'],
+            deepseek: ['deepseek-chat','deepseek-coder','deepseek-reasoner'],
+            gemini: ['gemini/gemini-2.5-pro-preview-05-06','gemini/gemini-2.5-flash-preview-04-17','gemini/gemini-2.0-flash','gemini/gemini-1.5-pro','gemini/gemini-1.5-flash'],
+            groq: ['groq/llama-3.3-70b-versatile','groq/llama-3.1-8b-instant','groq/mixtral-8x7b-32768','groq/whisper-large-v3'],
+            openrouter: ['anthropic/claude-opus-4-5','anthropic/claude-sonnet-4-5','openai/gpt-4o','openai/o3','google/gemini-2.5-pro-preview','deepseek/deepseek-chat','meta-llama/llama-3.3-70b-instruct'],
+            aihubmix: ['claude-opus-4-5-20250514','gpt-4o','deepseek-chat'],
+            siliconflow: ['deepseek-ai/DeepSeek-V3','deepseek-ai/DeepSeek-R1','Qwen/Qwen2.5-72B-Instruct'],
+            volcengine: ['doubao-1.5-pro-32k','doubao-1.5-lite-32k','deepseek-v3','deepseek-r1'],
+            dashscope: ['qwen-max','qwen-plus','qwen-turbo','qwen2.5-72b-instruct','qwen2.5-coder-32b-instruct'],
+            zhipu: ['glm-4-plus','glm-4-long','glm-4-flash','glm-4-air','glm-4'],
+            moonshot: ['kimi-k2.5','moonshot-v1-128k','moonshot-v1-32k','moonshot-v1-8k'],
+            minimax: ['MiniMax-Text-01','MiniMax-M1','abab6.5s-chat'],
+            vllm: [],
+            openai_codex: ['openai-codex/codex-mini-latest','openai-codex/o4-mini','openai-codex/o3','openai-codex/gpt-4o'],
+            github_copilot: ['github_copilot/gpt-4o','github_copilot/gpt-4o-mini','github_copilot/claude-3.5-sonnet','github_copilot/o3-mini'],
+            custom: [],
+        };
+
+        function renderModelDropdown(models, filter) {
+            const dd = document.getElementById('modelDropdown');
+            if (!dd) return;
+            const q = (filter || '').toLowerCase();
+            const filtered = q ? models.filter(m => m.toLowerCase().includes(q)) : models;
+            if (filtered.length === 0) {
+                dd.innerHTML = '<div style="padding:10px 14px;color:var(--text-muted);font-size:13px;">No matching models. Type any model name.</div>';
+            } else {
+                dd.innerHTML = filtered.map(m => `<div class="model-option" style="padding:8px 14px;cursor:pointer;font-size:13px;font-family:\'JetBrains Mono\',monospace;border-bottom:1px solid var(--border-light);transition:background 0.1s;" onmousedown="selectModel('${m.replace(/'/g, "\\'")}')" onmouseenter="this.style.background='var(--bg-hover)'" onmouseleave="this.style.background=''">${m}</div>`).join('');
+            }
+        }
+
+        function selectModel(model) {
+            const input = document.getElementById('agentModel');
+            if (input) input.value = model;
+            hideModelDropdown();
+            syncConfig();
+        }
+
+        function showModelDropdown() {
+            const dd = document.getElementById('modelDropdown');
+            if (!dd) return;
+            const input = document.getElementById('agentModel');
+            const filter = input ? input.value : '';
+            if (_currentModels.length > 0) {
+                renderModelDropdown(_currentModels, filter);
+                dd.style.display = 'block';
+                _modelDropdownVisible = true;
+            } else {
+                // Try loading models for current provider
+                const provider = document.getElementById('agentProvider')?.value;
+                if (provider) loadModelsForProvider(provider).then(() => {
+                    if (_currentModels.length > 0) {
+                        renderModelDropdown(_currentModels, filter);
+                        dd.style.display = 'block';
+                        _modelDropdownVisible = true;
+                    }
+                });
+            }
+        }
+
+        function hideModelDropdown() {
+            const dd = document.getElementById('modelDropdown');
+            if (dd) dd.style.display = 'none';
+            _modelDropdownVisible = false;
+        }
+
+        function onModelInput() {
+            const input = document.getElementById('agentModel');
+            const filter = input ? input.value : '';
+            if (_currentModels.length > 0) {
+                renderModelDropdown(_currentModels, filter);
+                const dd = document.getElementById('modelDropdown');
+                if (dd) dd.style.display = 'block';
+            }
+            syncConfig();
+        }
+
+        // Close dropdown on outside click
+        document.addEventListener('click', (e) => {
+            const combo = document.getElementById('modelCombo');
+            if (combo && !combo.contains(e.target)) {
+                hideModelDropdown();
+            }
+        });
+
         // --- Populate Agent Config Form from state ---
         function populateAgentConfigForm() {
             const c = state.agentConfig;
@@ -3945,8 +4092,8 @@ Write important context, facts, and information here...
             set('agentName', c.name);
             set('agentVersion', c.version);
             set('agentWorkspace', c.workspace);
-            set('agentModel', c.model);
             set('agentProvider', c.provider);
+            set('agentModel', c.model);
             set('agentTemperature', c.temperature);
             set('agentMaxTokens', c.max_tokens);
             set('agentMaxIterations', c.max_iterations);
@@ -3957,6 +4104,9 @@ Write important context, facts, and information here...
             // Memory
             const memEl = document.getElementById('memoryContent');
             if (memEl && state.memory) memEl.value = state.memory;
+            // Load models for the selected provider
+            const provider = c.provider || document.getElementById('agentProvider')?.value;
+            if (provider) loadModelsForProvider(provider);
         }
 
         // --- On field change: persist immediately + save to backend ---
@@ -3979,6 +4129,8 @@ Write important context, facts, and information here...
             const s = state[dataKey][id];
             if (!s) return;
             if (dataKey === 'providers') {
+                // Invalidate model cache so next fetch gets live models with new key
+                delete _modelCache[id];
                 NanobotAPI.saveProviderConfig(id, {
                     apiKey: s.fields?.api_key || '',
                     apiBase: s.fields?.base_url || null,

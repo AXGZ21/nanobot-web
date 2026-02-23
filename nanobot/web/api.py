@@ -136,6 +136,235 @@ async def get_providers(request: web.Request) -> web.Response:
     return _json(result)
 
 
+async def get_provider_models(request: web.Request) -> web.Response:
+    """GET /api/providers/{name}/models — list known models for a provider.
+
+    For providers with an API key configured, attempts to fetch live models
+    from the provider's /models endpoint. Falls back to a curated static list.
+    """
+    name = request.match_info["name"]
+
+    # Static model catalogue per provider (curated, common models)
+    STATIC_MODELS: dict[str, list[str]] = {
+        "anthropic": [
+            "claude-opus-4-5-20250514",
+            "claude-sonnet-4-5-20250514",
+            "claude-sonnet-4-20250514",
+            "anthropic/claude-opus-4-5",
+            "anthropic/claude-sonnet-4-5",
+            "anthropic/claude-sonnet-4",
+            "claude-3-5-sonnet-20241022",
+            "claude-3-5-haiku-20241022",
+            "claude-3-opus-20240229",
+            "claude-3-haiku-20240307",
+        ],
+        "openai": [
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-4-turbo",
+            "gpt-4",
+            "gpt-4o-2024-08-06",
+            "o1",
+            "o1-mini",
+            "o1-preview",
+            "o3",
+            "o3-mini",
+            "o4-mini",
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4.1-nano",
+        ],
+        "deepseek": [
+            "deepseek-chat",
+            "deepseek-coder",
+            "deepseek-reasoner",
+        ],
+        "gemini": [
+            "gemini/gemini-2.5-pro-preview-05-06",
+            "gemini/gemini-2.5-flash-preview-04-17",
+            "gemini/gemini-2.0-flash",
+            "gemini/gemini-2.0-flash-lite",
+            "gemini/gemini-1.5-pro",
+            "gemini/gemini-1.5-flash",
+        ],
+        "groq": [
+            "groq/llama-3.3-70b-versatile",
+            "groq/llama-3.1-8b-instant",
+            "groq/llama-3.1-70b-versatile",
+            "groq/mixtral-8x7b-32768",
+            "groq/gemma2-9b-it",
+            "groq/whisper-large-v3",
+            "groq/whisper-large-v3-turbo",
+            "groq/deepseek-r1-distill-llama-70b",
+        ],
+        "openrouter": [
+            "anthropic/claude-opus-4-5",
+            "anthropic/claude-sonnet-4-5",
+            "anthropic/claude-sonnet-4",
+            "openai/gpt-4o",
+            "openai/gpt-4o-mini",
+            "openai/o3",
+            "openai/o3-mini",
+            "openai/o4-mini",
+            "google/gemini-2.5-pro-preview",
+            "google/gemini-2.5-flash-preview",
+            "google/gemini-2.0-flash-001",
+            "deepseek/deepseek-chat",
+            "deepseek/deepseek-reasoner",
+            "meta-llama/llama-3.3-70b-instruct",
+            "qwen/qwen-2.5-72b-instruct",
+            "mistralai/mistral-large-2411",
+        ],
+        "aihubmix": [
+            "claude-opus-4-5-20250514",
+            "claude-sonnet-4-5-20250514",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "deepseek-chat",
+            "gemini-2.0-flash",
+        ],
+        "siliconflow": [
+            "deepseek-ai/DeepSeek-V3",
+            "deepseek-ai/DeepSeek-R1",
+            "Qwen/Qwen2.5-72B-Instruct",
+            "Qwen/Qwen2.5-7B-Instruct",
+            "THUDM/glm-4-9b-chat",
+            "meta-llama/Meta-Llama-3.1-70B-Instruct",
+        ],
+        "volcengine": [
+            "doubao-1.5-pro-32k",
+            "doubao-1.5-lite-32k",
+            "doubao-pro-256k",
+            "deepseek-v3",
+            "deepseek-r1",
+        ],
+        "dashscope": [
+            "qwen-max",
+            "qwen-plus",
+            "qwen-turbo",
+            "qwen-long",
+            "qwen2.5-72b-instruct",
+            "qwen2.5-14b-instruct",
+            "qwen2.5-7b-instruct",
+            "qwen2.5-coder-32b-instruct",
+        ],
+        "zhipu": [
+            "glm-4-plus",
+            "glm-4-long",
+            "glm-4-flash",
+            "glm-4-air",
+            "glm-4",
+        ],
+        "moonshot": [
+            "kimi-k2.5",
+            "moonshot-v1-128k",
+            "moonshot-v1-32k",
+            "moonshot-v1-8k",
+        ],
+        "minimax": [
+            "MiniMax-Text-01",
+            "MiniMax-M1",
+            "abab6.5s-chat",
+            "abab6.5-chat",
+        ],
+        "vllm": [],  # user provides their own model name
+        "openai_codex": [
+            "openai-codex/codex-mini-latest",
+            "openai-codex/o4-mini",
+            "openai-codex/o3",
+            "openai-codex/gpt-4o",
+        ],
+        "github_copilot": [
+            "github_copilot/gpt-4o",
+            "github_copilot/gpt-4o-mini",
+            "github_copilot/claude-3.5-sonnet",
+            "github_copilot/o3-mini",
+        ],
+        "custom": [],  # user enters any model name
+    }
+
+    static_list = STATIC_MODELS.get(name, [])
+
+    # Try to fetch live model list from provider API
+    config = _reload_config(request.app)
+    providers_data = config.providers.model_dump(by_alias=True)
+    camel_name = _to_camel(name)
+    p = providers_data.get(camel_name, providers_data.get(name, {}))
+    api_key = p.get("apiKey", "")
+    api_base = p.get("apiBase", "")
+
+    live_models: list[str] = []
+
+    if api_key and name not in ("openai_codex", "github_copilot"):
+        # Attempt live /models fetch
+        from nanobot.providers.registry import find_by_name
+        spec = find_by_name(name)
+
+        base_url = api_base or (spec.default_api_base if spec else "")
+        if not base_url:
+            # Derive base URL from known providers
+            _default_bases = {
+                "anthropic": "https://api.anthropic.com",
+                "openai": "https://api.openai.com/v1",
+                "deepseek": "https://api.deepseek.com/v1",
+                "groq": "https://api.groq.com/openai/v1",
+                "dashscope": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "zhipu": "https://open.bigmodel.cn/api/paas/v4",
+                "moonshot": "https://api.moonshot.ai/v1",
+                "minimax": "https://api.minimax.io/v1",
+            }
+            base_url = _default_bases.get(name, "")
+
+        if base_url:
+            import aiohttp as _aiohttp
+
+            models_url = base_url.rstrip("/")
+            if not models_url.endswith("/models"):
+                models_url += "/models"
+
+            headers: dict[str, str] = {}
+            if name == "anthropic":
+                headers["x-api-key"] = api_key
+                headers["anthropic-version"] = "2023-06-01"
+            else:
+                headers["Authorization"] = f"Bearer {api_key}"
+
+            try:
+                async with _aiohttp.ClientSession() as session:
+                    async with session.get(
+                        models_url, headers=headers, timeout=_aiohttp.ClientTimeout(total=10)
+                    ) as resp:
+                        if resp.status == 200:
+                            body = await resp.json()
+                            # OpenAI-compatible: { data: [{id: ...}, ...] }
+                            if isinstance(body, dict) and "data" in body:
+                                for m in body["data"]:
+                                    mid = m.get("id", "") if isinstance(m, dict) else str(m)
+                                    if mid:
+                                        live_models.append(mid)
+                            elif isinstance(body, list):
+                                for m in body:
+                                    mid = m.get("id", "") if isinstance(m, dict) else str(m)
+                                    if mid:
+                                        live_models.append(mid)
+            except Exception as exc:
+                logger.debug("Live model fetch failed for {}: {}", name, exc)
+
+    # Merge: live models first, then static (deduplicated)
+    seen: set[str] = set()
+    merged: list[str] = []
+    for m in live_models + static_list:
+        if m not in seen:
+            seen.add(m)
+            merged.append(m)
+
+    return _json({
+        "provider": name,
+        "models": merged,
+        "live": len(live_models) > 0,
+    })
+
+
 async def put_provider(request: web.Request) -> web.Response:
     """PUT /api/providers/{name} — update a single provider's config."""
     name = request.match_info["name"]
@@ -1127,6 +1356,7 @@ def setup_routes(app: web.Application) -> None:
 
     # Providers
     app.router.add_get("/api/providers", get_providers)
+    app.router.add_get("/api/providers/{name}/models", get_provider_models)
     app.router.add_put("/api/providers/{name}", put_provider)
 
     # Channels
