@@ -256,6 +256,10 @@ def create_app() -> web.Application:
     # Initialize WebSocket clients
     app["ws_clients"] = set()
 
+    # Initialize data directory
+    from nanobot.config.loader import get_data_dir
+    app["data_dir"] = get_data_dir()
+
     # Auth routes
     app.router.add_get("/login", login_page)
     app.router.add_post("/api/login", login_handler)
