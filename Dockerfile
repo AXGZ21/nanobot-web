@@ -1,4 +1,4 @@
-# Force rebuild v0.1.4.post2 - 20260228
+# Force rebuild v0.1.4.post2 - 20260228-mobile
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 # Install Node.js 20 for the WhatsApp bridge
