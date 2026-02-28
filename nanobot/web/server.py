@@ -252,7 +252,10 @@ async def health_handler(request: web.Request):
 def create_app() -> web.Application:
     """Create and configure the web application."""
     app = web.Application(middlewares=[auth_middleware])
-    
+
+    # Initialize WebSocket clients
+    app["ws_clients"] = set()
+
     # Auth routes
     app.router.add_get("/login", login_page)
     app.router.add_post("/api/login", login_handler)
