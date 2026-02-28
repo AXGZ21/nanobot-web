@@ -55,9 +55,14 @@ def _hash_password(password: str) -> str:
 def _check_password(password: str) -> bool:
     """Check password against env var or stored hash."""
     env_pw = _get_configured_password()
+    logger.info(f"[AUTH] _check_password called, env_pw={'SET' if env_pw else 'NOT SET'}")
     if env_pw:
         # Hash both sides so comparison is consistent regardless of how password was set
-        return secrets.compare_digest(_hash_password(password), _hash_password(env_pw))
+        input_hash = _hash_password(password)
+        env_hash = _hash_password(env_pw)
+        result = secrets.compare_digest(input_hash, env_hash)
+        logger.info(f"[AUTH] Password check result: {result}")
+        return result
 
     stored = _get_stored_hash()
     if stored:
