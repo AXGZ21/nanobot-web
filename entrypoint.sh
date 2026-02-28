@@ -12,8 +12,10 @@ if [ ! -f "$CONFIG_FILE" ]; then
     nanobot onboard
 fi
 
-# Use Railway's $PORT if set, otherwise default 1890
-WEB_PORT="${PORT:-1890}"
+# Use Railway's $PORT if set, otherwise default to 8080
+WEB_PORT="${PORT:-8080}"
+
+echo "[DEBUG] PORT=$PORT, WEB_PORT=$WEB_PORT"
 
 echo ""
 echo "  ╔══════════════════════════════════════════════════╗"
