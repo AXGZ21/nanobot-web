@@ -114,8 +114,8 @@ async def auth_middleware(request: web.Request, handler):
     if request.path.startswith("/static/"):
         return await handler(request)
 
-    # Allow login page
-    if request.path == "/login":
+    # Allow login page and login API
+    if request.path == "/login" or request.path == "/api/login":
         return await handler(request)
 
     # Allow set-password endpoint (for first-run setup)
