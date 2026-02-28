@@ -1892,15 +1892,282 @@
             color: var(--primary-800);
             font-weight: 600;
         }
+
+        /* Mobile Responsive Styles */
+        @media (max-width: 768px) {
+            body {
+                overflow: auto;
+            }
+
+            /* Sidebar - hidden by default on mobile */
+            .sidebar {
+                position: fixed;
+                left: -280px;
+                height: 100vh;
+                z-index: 1000;
+                transition: left 0.3s ease;
+                box-shadow: 4px 0 20px rgba(0,0,0,0.5);
+            }
+
+            .sidebar.open {
+                left: 0;
+            }
+
+            /* Mobile menu toggle */
+            .mobile-menu-btn {
+                display: flex !important;
+            }
+
+            /* Main content full width */
+            .main-content {
+                width: 100%;
+                min-height: 100vh;
+            }
+
+            /* Topbar */
+            .topbar {
+                padding: 0 16px;
+                height: 56px;
+            }
+
+            .topbar-title h2 {
+                font-size: 16px;
+            }
+
+            /* Content area */
+            .content-area {
+                padding: 16px;
+            }
+
+            /* Stats grid - stack on mobile */
+            .stats-grid {
+                grid-template-columns: 1fr;
+                gap: 12px;
+            }
+
+            /* Cards */
+            .card {
+                padding: 16px;
+                margin-bottom: 12px;
+            }
+
+            .card-title {
+                font-size: 16px;
+            }
+
+            /* Two column layout - stack on mobile */
+            .two-column,
+            .agent-config-layout {
+                grid-template-columns: 1fr;
+            }
+
+            /* Form grid */
+            .form-grid-2 {
+                grid-template-columns: 1fr;
+            }
+
+            /* Tables - horizontal scroll */
+            .table-wrapper {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .table {
+                min-width: 600px;
+            }
+
+            /* Buttons - larger touch targets */
+            .btn {
+                padding: 12px 20px;
+                min-height: 44px;
+                font-size: 14px;
+            }
+
+            .btn-small {
+                padding: 8px 12px;
+                min-height: 36px;
+            }
+
+            /* Form inputs - larger touch targets */
+            .form-input,
+            .form-select,
+            .form-textarea {
+                padding: 14px 12px;
+                font-size: 16px; /* Prevents iOS zoom */
+            }
+
+            /* Provider cards - stack on mobile */
+            .providers-grid {
+                grid-template-columns: 1fr;
+            }
+
+            /* Nav items - larger touch targets */
+            .nav-item {
+                padding: 14px 24px;
+                min-height: 48px;
+            }
+
+            /* Stat cards */
+            .stat-value {
+                font-size: 24px;
+            }
+
+            .stat-label {
+                font-size: 10px;
+            }
+
+            /* Modal/Overlay */
+            .modal-overlay {
+                padding: 16px;
+            }
+
+            .modal-content {
+                padding: 16px;
+                margin: 0;
+                max-width: 100%;
+            }
+
+            /* Hide non-essential elements on mobile */
+            .breadcrumb {
+                display: none;
+            }
+
+            /* Chat interface */
+            .chat-messages {
+                height: calc(100vh - 200px);
+            }
+
+            .chat-input-area {
+                padding: 12px;
+            }
+
+            .chat-input {
+                font-size: 16px;
+            }
+
+            /* Toast notifications */
+            .toast {
+                left: 16px;
+                right: 16px;
+                bottom: 16px;
+            }
+
+            /* Connection status */
+            .connection-status {
+                padding: 4px 10px;
+                font-size: 11px;
+            }
+        }
+
+        /* Small mobile */
+        @media (max-width: 480px) {
+            .sidebar {
+                width: 100%;
+                left: -100%;
+            }
+
+            .sidebar-logo {
+                padding: 16px;
+            }
+
+            .sidebar-logo h1 {
+                font-size: 20px;
+            }
+
+            .content-area {
+                padding: 12px;
+            }
+
+            .card {
+                padding: 12px;
+                border-radius: 8px;
+            }
+
+            .stats-grid {
+                gap: 8px;
+            }
+
+            .btn {
+                width: 100%;
+                justify-content: center;
+            }
+
+            .table-actions {
+                flex-direction: column;
+                gap: 4px;
+            }
+        }
+
+        /* Mobile menu button (hidden by default) */
+        .mobile-menu-btn {
+            display: none;
+            position: fixed;
+            top: 12px;
+            left: 12px;
+            z-index: 999;
+            width: 40px;
+            height: 40px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            cursor: pointer;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .mobile-menu-btn span {
+            display: block;
+            width: 20px;
+            height: 2px;
+            background: var(--text-primary);
+            transition: all 0.3s;
+        }
+
+        .mobile-menu-btn.open span:nth-child(1) {
+            transform: rotate(45deg) translate(4px, 4px);
+        }
+
+        .mobile-menu-btn.open span:nth-child(2) {
+            opacity: 0;
+        }
+
+        .mobile-menu-btn.open span:nth-child(3) {
+            transform: rotate(-45deg) translate(4px, -4px);
+        }
+
+        /* Sidebar overlay */
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 999;
+        }
+
+        .sidebar-overlay.active {
+            display: block;
+        }
     </style>
 </head>
 <body>
+    <!-- Mobile Menu Button -->
+    <button class="mobile-menu-btn" onclick="toggleMobileMenu()">
+        <span></span>
+        <span></span>
+        <span></span>
+    </button>
+
+    <!-- Sidebar Overlay -->
+    <div class="sidebar-overlay" onclick="toggleMobileMenu()"></div>
+
     <div class="dashboard">
         <!-- Sidebar -->
         <div class="sidebar">
             <div class="sidebar-logo">
                 <h1>Nanobot</h1>
-                <div class="version">v0.1.4.post1 by HKUDS</div>
+                <div class="version">v0.1.4.post2 by HKUDS</div>
             </div>
             <div class="sidebar-nav">
                 <div class="nav-section">
@@ -2070,7 +2337,7 @@
 
                         <div class="card">
                             <div class="card-header">
-                                <h3 class="card-title">v0.1.4.post1 Highlights</h3>
+                                <h3 class="card-title">v0.1.4.post2 Highlights</h3>
                                 <p class="card-subtitle">Latest improvements</p>
                             </div>
                             <div class="highlights-list">
@@ -2438,7 +2705,7 @@ Write important context, facts, and information here...
 - Code comments: Always include
 
 ## Project Context
-- Framework: Nanobot v0.1.4.post1
+- Framework: Nanobot v0.1.4.post2
 - Language: Python 3.11+"></textarea>
                             </div>
                             <button class="btn btn-primary" onclick="saveMemory()">💾 Save Memory</button>
@@ -2624,7 +2891,7 @@ Write important context, facts, and information here...
                 <div id="changelog" class="page">
                     <div class="card">
                         <div class="card-header">
-                            <h3 class="card-title">Release v0.1.4.post1</h3>
+                            <h3 class="card-title">Release v0.1.4.post2</h3>
                             <p class="card-subtitle">Latest updates and improvements</p>
                         </div>
 
@@ -2984,6 +3251,27 @@ Write important context, facts, and information here...
     </div>
 
     <script>
+        // --- Mobile Menu Toggle ---
+        function toggleMobileMenu() {
+            const sidebar = document.querySelector('.sidebar');
+            const overlay = document.querySelector('.sidebar-overlay');
+            const btn = document.querySelector('.mobile-menu-btn');
+            sidebar.classList.toggle('open');
+            overlay.classList.toggle('active');
+            btn.classList.toggle('open');
+        }
+
+        // Close mobile menu when clicking nav items
+        document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('.nav-item').forEach(function(item) {
+                item.addEventListener('click', function() {
+                    if (window.innerWidth <= 768) {
+                        toggleMobileMenu();
+                    }
+                });
+            });
+        });
+
         // ============================================================
         // NANOBOT DASHBOARD — FULLY MODIFIABLE API-DRIVEN ENGINE
         // ============================================================
@@ -4212,7 +4500,7 @@ Write important context, facts, and information here...
                     { time: '18m', badge: 'CH', badgeClass: 'badge-success', message: 'CLI channel ready' },
                     { time: '25m', badge: 'SKILL', badgeClass: 'badge-info', message: 'Loaded skills from workspace' },
                     { time: '32m', badge: 'LLM', badgeClass: 'badge-primary', message: 'Connected to Anthropic API' },
-                    { time: '1h', badge: 'SYS', badgeClass: 'badge-success', message: 'Nanobot v0.1.4.post1 started' }
+                    { time: '1h', badge: 'SYS', badgeClass: 'badge-success', message: 'Nanobot v0.1.4.post2 started' }
                 ];
             }
             feed.innerHTML = state.activityLog.map(a => `
